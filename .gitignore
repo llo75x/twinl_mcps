@@ -1,0 +1,23 @@
+# ============================================================
+# twinl_mcps — .gitignore
+# ============================================================
+# Repo docs-only à l'étape 1 (pas de code, pas de secrets ici).
+# Garder le .gitignore quand même pour l'étape 2 (toolkit Python).
+
+# ── Python (pour l'étape 2, quand le toolkit arrivera) ───────
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# ── Secrets / config locale ──────────────────────────────────
+.env
+.env.local
+
+# ── OS / éditeurs ────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+*.swp
+.vscode/
+.idea/
