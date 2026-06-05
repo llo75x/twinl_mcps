@@ -17,7 +17,7 @@ Procédure pour exposer une base miroir MariaDB du VPS à **claude.ai (web)** vi
 
 ```
 claude.ai (web)
-   │  OAuth 2.1 (CIMD + PKCE S256) ─────────► WorkOS AuthKit  (invite-only ; ne voit pas les données)
+   │  OAuth 2.1 (DCR + PKCE S256) ──────────► WorkOS AuthKit  (invite-only ; ne voit pas les données)
    │  Streamable HTTP (Bearer JWT)
    ▼
 Apache2 (façade VPS, TLS certbot)   mcp-iafec.twinl.fr / mcp-projea.twinl.fr
@@ -81,14 +81,20 @@ logs **anonymisés** (jamais de données ni de littéraux), transport **stateles
 ## Phase 2 — WorkOS AuthKit  *(utilisateur)*
 
 1. Créer un projet **AuthKit** (https://dashboard.workos.com).
-2. **Connect → Configuration** :
-   - **Activer CIMD** (*Client ID Metadata Document*) → mécanisme principal, **zéro client orphelin**.
-     Laisser **DCR désactivé** (ne l'activer qu'en secours pour un futur client ne supportant pas CIMD).
-   - **MCP resource indicators** : ajouter les 2 URLs publiques exactes (celles loggées au démarrage des
-     conteneurs en phase 4, normalement `https://mcp-iafec.twinl.fr` et `https://mcp-projea.twinl.fr`).
+2. **Connect → Configuration → MCP Auth** :
+   - **Activer DCR** (*Dynamic Client Registration*) — **requis** : au 2026-06, claude.ai ne sait
+     authentifier le connecteur MCP **que** via DCR. Coche aussi CIMD (les deux peuvent cohabiter,
+     CIMD restera inutilisé jusqu'à ce que claude.ai le supporte). Chaque connexion claude.ai crée
+     une application dans Connect → Applications — c'est attendu, ne pas s'en débarrasser.
+   - **MCP resource indicators** : ajouter les URLs **avec `/mcp` final** (`https://mcp-iafec.twinl.fr/mcp`
+     et `https://mcp-projea.twinl.fr/mcp`). C'est l'URL qu'annonce le serveur dans
+     `/.well-known/oauth-protected-resource/mcp` (`resource`) → si elle ne matche pas exactement,
+     WorkOS renvoie `error=invalid_target` côté claude.ai. Ajouter aussi la version sans `/mcp` est
+     sans risque et utile pour des clients qui enverraient l'origine seule.
 3. **Restreindre l'accès (gate le plus précoce)** :
-   - Section authentication → **désactiver le toggle « Sign up »** (instance invite-only).
-   - **Users → Invites** → inviter **uniquement l'email de Laurent**.
+   - **Authentication → Features** → **désactiver le toggle « Sign up »** (instance invite-only).
+   - **Users → Invitations → Invite user** → inviter **uniquement l'email de Laurent**. Organization
+     peut rester vide.
 4. Noter le **`AUTHKIT_DOMAIN`** (ex. `https://xxxx.authkit.app`) — il ira dans les `.env`.
 
 > Le callback OAuth de Claude est `https://claude.ai/api/mcp/auth_callback` (géré automatiquement par
@@ -207,7 +213,8 @@ Tests fonctionnels (via claude.ai ou un client FastMCP avec OAuth) :
   « tronqué » ; RAM conteneur stable (`docker stats`).
 - **Isolation** : sous le user RO, `SHOW DATABASES` ne liste que `<base>_readonly` + `information_schema`.
 - **Auth** : autre email → refusé par WorkOS ; token expiré / mauvais `aud` → 401.
-- **CIMD** : après plusieurs (re)connexions, **aucun nouveau client** dans le dashboard WorkOS.
+- **DCR** : chaque (re)connexion crée une nouvelle entrée dans Connect → Applications (attendu).
+  Nettoyage périodique manuel possible si la liste devient encombrée.
 - **Prefork** : `sudo apachectl status` → aucune connexion `/mcp` tenue au repos (preuve du mode stateless).
 - **Résilience** : redémarrer MariaDB → la requête suivante se reconnecte, le conteneur ne crashe pas
   (`docker compose ps` reste up).
@@ -223,8 +230,12 @@ Tests fonctionnels (via claude.ai ou un client FastMCP avec OAuth) :
    long-vécu) + `ProxyTimeout` borné. **Ne PAS** basculer le MPM global vers `event` (casserait mod_php).
 2. **`mod_deflate` casse le streaming** : compression désactivée explicitement sur les vhosts
    (`SetEnv no-gzip 1` + `RequestHeader unset Accept-Encoding`).
-3. **CIMD vs DCR** : utiliser **CIMD** (pas de client orphelin). Le DCR enregistrerait un client à chaque
-   connexion fraîche → sprawl. DCR gardé en réserve (toggle WorkOS) pour un futur client non-CIMD.
+3. **DCR requis (claude.ai n'utilise pas encore CIMD)** : au 2026-06, claude.ai ne fait que DCR pour
+   les connecteurs MCP. Sans DCR activé côté WorkOS, le `client_id` envoyé par claude.ai ne matche
+   rien → page d'erreur AuthKit `error=application_not_found`. Conséquence acceptée : chaque connexion
+   crée une entrée dans Connect → Applications. CIMD reste activé en parallèle (zéro coût) pour quand
+   claude.ai le supportera. **Si un connecteur a été essayé avant l'activation de DCR**, claude.ai
+   garde un état corrompu — **supprimer puis recréer le connecteur** dans claude.ai pour repartir propre.
 4. **Secrets** : `iafec.env` / `projea.env` créés **sur le VPS uniquement**, `chmod 600`, gitignored.
    Ne jamais committer les passwords (règle `iafec/OPS.md` §3.5).
 5. **MariaDB sur l'hôte** : le conteneur l'atteint via `host.docker.internal:host-gateway`, **pas** en

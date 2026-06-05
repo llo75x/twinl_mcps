@@ -245,3 +245,84 @@ Et toujours **vérifier après écriture** que le `.local.sql` contient bien le 
 ```bash
 grep "IDENTIFIED BY" scripts/<nom>_setup.local.sql
 ```
+
+---
+
+## 12. ⚠️ HTTPS distant — claude.ai utilise DCR, pas CIMD (au 2026-06)
+
+**Le piège qui coûte le plus de temps en Phase 2.** WorkOS expose deux mécanismes
+d'enregistrement client : CIMD (*Client ID Metadata Document*, propre, pas d'objet
+persistant) et DCR (*Dynamic Client Registration*, crée une app par connexion). Le doc
+d'install initial recommandait CIMD seul. **Sauf que claude.ai ne sait pas encore faire
+CIMD** — il fait du DCR pur.
+
+### Symptôme
+
+Page d'erreur AuthKit : « L'application que vous essayez d'autoriser est introuvable. »
+URL : `https://<authkit>.authkit.app/oauth2/error?error=application_not_found`.
+
+### Cause
+
+claude.ai POST `/oauth2/register` (DCR). Si DCR est désactivé côté WorkOS, le register
+échoue silencieusement, claude.ai redirige vers `/oauth2/authorize` avec un `client_id`
+invalide → page d'erreur.
+
+### Fix
+
+WorkOS → **Connect → Configuration → MCP Auth → Manage** → cocher DCR (CIMD peut rester
+coché en parallèle, c'est gratuit). Si un connecteur a été créé claude.ai-side avant
+l'activation de DCR, claude.ai garde un état corrompu — **supprimer le connecteur** dans
+claude.ai (Personnaliser → Connecteurs → kebab → Supprimer) puis **le recréer**.
+
+---
+
+## 13. ⚠️ HTTPS distant — Resource Indicators doivent inclure `/mcp`
+
+### Symptôme
+
+Après login OAuth réussi, redirect vers `https://claude.ai/api/mcp/auth_callback?error=invalid_target`.
+Le JSON de claude.ai mentionne aussi `state: Field required` — c'est secondaire, le vrai
+problème est `invalid_target`.
+
+### Cause
+
+OAuth 2.0 Resource Indicators (RFC 8707). claude.ai envoie dans la requête `authorize` un
+paramètre `resource=<exactement la string que le serveur a déclarée dans /.well-known/oauth-protected-resource/mcp>`.
+Le serveur FastMCP annonce `resource: "https://mcp-<nom>.twinl.fr/mcp"` (**avec** `/mcp`).
+Si WorkOS n'a en allowlist que `https://mcp-<nom>.twinl.fr` (sans `/mcp`), il rejette avec
+`invalid_target`.
+
+### Fix
+
+WorkOS → Connect → Configuration → **Edit MCP resources** → ajouter les variantes **avec
+`/mcp`** : `https://mcp-iafec.twinl.fr/mcp` et `https://mcp-projea.twinl.fr/mcp`. Garder
+les versions sans `/mcp` ne nuit pas (compatible si un autre client envoie l'origine seule).
+
+---
+
+## 14. ⚠️ HTTPS distant — état corrompu côté claude.ai après échec OAuth
+
+Au-delà du piège §12 (DCR off → application_not_found), tout échec OAuth survenu pendant
+les essais peut laisser un `client_id` invalide caché dans le storage claude.ai du
+connecteur. Les essais suivants — même après avoir corrigé la config WorkOS — réutilisent
+ce id et échouent pareil.
+
+### Symptôme
+
+Même erreur OAuth qui persiste alors que la config WorkOS a été corrigée et qu'elle marche
+pour un autre connecteur jumeau.
+
+### Fix
+
+**Supprimer** le connecteur dans claude.ai (Personnaliser → Connecteurs → bouton kebab →
+Supprimer → confirmer dans la dialog rouge), puis **Re-ajouter** depuis zéro
+(Ajouter un connecteur personnalisé). Le flux OAuth refait un DCR propre.
+
+---
+
+## 15. ⚠️ HTTPS distant — `certbot --apache` non-interactif quand le compte LE existe déjà
+
+Mineur mais utile à savoir : si un cert Let's Encrypt a déjà été émis sur le VPS (n'importe
+quel domaine), le compte LE est en cache local. Du coup `certbot certonly --apache -d <new>`
+peut être lancé en `--non-interactive --agree-tos --keep-until-expiring` sans devoir refournir
+d'email — utile pour scripter le bloc Phase 5 en une seule passe sudo.

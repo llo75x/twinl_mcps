@@ -1,14 +1,42 @@
-# Reprise — Déploiement MCP HTTPS distant (état au 5 juin 2026)
+# Reprise — Déploiement MCP HTTPS distant (TERMINÉ le 6 juin 2026)
 
-Document de **reprise de session** (passage desktop → laptop). État précis du déploiement des MCPs
-iafec + projea en serveurs HTTPS distants pour **claude.ai (web)**. Plan complet :
-[`INSTALL_PROCEDURE_HTTPS.md`](INSTALL_PROCEDURE_HTTPS.md). Conception : [`ARCHITECTURE.md`](ARCHITECTURE.md).
+> **Document frozen.** Le déploiement est terminé. Conservé pour traçabilité du passage desktop →
+> laptop et des décisions prises. Pour réinstaller from scratch : voir [`INSTALL_PROCEDURE_HTTPS.md`](INSTALL_PROCEDURE_HTTPS.md).
+> Pour les pièges rencontrés et corrigés en cours de route : [`PITFALLS.md`](PITFALLS.md) §12-15.
 
-## TL;DR — où on en est
+## Statut final
 
-Phases 1 à 4 **faites et validées**. Bloqué à la **Phase 5 (Apache+TLS)** qui exige le **mot de passe
-root** du VPS → **à lancer par toi** (l'agent ne peut pas piper un mot de passe sudo). Puis **Phase 2
-(config WorkOS)** + **Phase 6 (connecteur claude.ai)**, toutes deux dans le navigateur.
+```
+Phase 1  Code & config .................................. ✅ FAIT (commité, 887d1ed)
+Phase 2  WorkOS (DCR+CIMD, RI×4 avec /mcp, Sign-up off, invite) ✅ FAIT
+Phase 3  DNS (mcp-iafec/mcp-projea → 54.38.35.104) ...... ✅ FAIT & vérifié
+Phase 4  Conteneurs sur le VPS .......................... ✅ FAIT & validé (healthy)
+Phase 5  Apache + TLS (certbot) ......................... ✅ FAIT (certs émis, vhost actif)
+Phase 6  Connecteur claude.ai (mcp-iafec + mcp-projea) .. ✅ FAIT (connectés via DCR)
+```
+
+## Corrections au plan initial appliquées le 6 juin 2026
+
+Trois écarts entre la procédure prévue (cf. doc original ci-dessous) et la réalité observée :
+
+1. **DCR obligatoire** : claude.ai ne supporte pas encore CIMD. L'erreur `application_not_found`
+   à la 1ère tentative venait du fait que CIMD était seul activé. Fix : activer DCR aussi
+   dans WorkOS Connect → Configuration → MCP Auth.
+2. **Resource Indicators doivent inclure `/mcp`** : le serveur annonce `resource: ".../mcp"` dans
+   son `/.well-known/oauth-protected-resource/mcp`, donc claude.ai envoie cette string-là dans
+   le param `resource` OAuth. Sans le matching exact côté WorkOS → `invalid_target`. Fix : ajouter
+   `https://mcp-iafec.twinl.fr/mcp` et `https://mcp-projea.twinl.fr/mcp` (les versions sans `/mcp`
+   gardées en plus, sans risque).
+3. **Connecteur claude.ai en état corrompu après échec OAuth** : un client_id stale est conservé
+   localement par claude.ai. Fix : **supprimer puis recréer** le connecteur depuis Personnaliser →
+   Connecteurs (kebab → Supprimer rouge → confirmer → Ajouter un connecteur personnalisé).
+
+Ces 3 corrections sont reportées dans [`PITFALLS.md`](PITFALLS.md) §12-15 et appliquées
+dans [`INSTALL_PROCEDURE_HTTPS.md`](INSTALL_PROCEDURE_HTTPS.md) phase 2 + section pièges.
+
+---
+
+## État au moment du passage desktop → laptop (5 juin 2026, conservé pour historique)
 
 ```
 Phase 1  Code & config .................................. ✅ FAIT (commité)
