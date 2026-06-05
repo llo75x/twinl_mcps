@@ -1,0 +1,88 @@
+# =============================================================================
+# Vhosts Apache pour les 2 serveurs MCP HTTPS (façade VPS, Apache2 mpm_prefork).
+# À déposer dans /etc/apache2/sites-available/ puis `a2ensite`.
+#
+# Pré-requis modules (phase 5) :  a2enmod proxy proxy_http ssl headers rewrite
+# NE PAS activer mod_cache sur ces vhosts. NE PAS toucher au MPM global (prefork
+# imposé par mod_php des autres applis ; le mode stateless de FastMCP évite que
+# les connexions retiennent un worker).
+#
+# TLS : soit `certbot --apache -d mcp-iafec.twinl.fr -d mcp-projea.twinl.fr`
+# (auto-injecte les directives SSL), soit `certbot certonly` + les chemins ci-dessous.
+# =============================================================================
+
+# ── Redirection HTTP → HTTPS (+ challenge ACME) ──────────────────────────────
+<VirtualHost *:80>
+    ServerName mcp-iafec.twinl.fr
+    ServerAlias mcp-projea.twinl.fr
+    DocumentRoot /var/www/html
+    # Laisser passer le challenge Let's Encrypt
+    Alias /.well-known/acme-challenge/ /var/www/html/.well-known/acme-challenge/
+    <Location "/.well-known/acme-challenge/">
+        ProxyPass !
+        Require all granted
+    </Location>
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</VirtualHost>
+
+# ── Bloc commun de réglages streaming/anti-buffering ─────────────────────────
+# (répété dans chaque vhost HTTPS car non héritable globalement de façon fiable)
+
+# ── HTTPS — MCP iafec ─────────────────────────────────────────────────────────
+<VirtualHost *:443>
+    ServerName mcp-iafec.twinl.fr
+
+    SSLEngine on
+    SSLCertificateFile      /etc/letsencrypt/live/mcp-iafec.twinl.fr/fullchain.pem
+    SSLCertificateKeyFile   /etc/letsencrypt/live/mcp-iafec.twinl.fr/privkey.pem
+    SSLProtocol             all -SSLv3 -TLSv1 -TLSv1.1
+
+    # En-têtes de sécurité
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Strict-Transport-Security "max-age=31536000"
+
+    # --- Streaming / anti-buffering (transport Streamable HTTP) ---
+    # Compression DÉSACTIVÉE : mod_deflate bufferise et casse le streaming SSE.
+    SetEnv no-gzip 1
+    RequestHeader unset Accept-Encoding
+    # Chunked + flush immédiat des paquets proxy.
+    SetEnv proxy-sendchunked 1
+    ProxyTimeout 120
+    ProxyPreserveHost On
+
+    # Le conteneur écoute en 127.0.0.1:8081 (bind docker-compose).
+    ProxyPass        "/" "http://127.0.0.1:8081/" flushpackets=on
+    ProxyPassReverse "/" "http://127.0.0.1:8081/"
+
+    ErrorLog  ${APACHE_LOG_DIR}/mcp-iafec-error.log
+    CustomLog ${APACHE_LOG_DIR}/mcp-iafec-access.log combined
+</VirtualHost>
+
+# ── HTTPS — MCP projea ────────────────────────────────────────────────────────
+<VirtualHost *:443>
+    ServerName mcp-projea.twinl.fr
+
+    SSLEngine on
+    SSLCertificateFile      /etc/letsencrypt/live/mcp-projea.twinl.fr/fullchain.pem
+    SSLCertificateKeyFile   /etc/letsencrypt/live/mcp-projea.twinl.fr/privkey.pem
+    SSLProtocol             all -SSLv3 -TLSv1 -TLSv1.1
+
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Strict-Transport-Security "max-age=31536000"
+
+    SetEnv no-gzip 1
+    RequestHeader unset Accept-Encoding
+    SetEnv proxy-sendchunked 1
+    ProxyTimeout 120
+    ProxyPreserveHost On
+
+    ProxyPass        "/" "http://127.0.0.1:8082/" flushpackets=on
+    ProxyPassReverse "/" "http://127.0.0.1:8082/"
+
+    ErrorLog  ${APACHE_LOG_DIR}/mcp-projea-error.log
+    CustomLog ${APACHE_LOG_DIR}/mcp-projea-access.log combined
+</VirtualHost>

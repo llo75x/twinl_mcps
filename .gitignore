@@ -15,6 +15,11 @@ __pycache__/
 .env
 .env.local
 
+# ── Secrets des instances MCP HTTPS (créés sur le VPS, jamais commités) ──────
+mcps/*.env
+mcps/**/*.local.*
+!mcps/server/.env.example
+
 # ── OS / éditeurs ────────────────────────────────────────────
 Thumbs.db
 .DS_Store

@@ -1,59 +1,45 @@
-# mcps/ — Placeholder pour l'étape 2
+# mcps/ — Serveur MCP HTTPS distant (iafec + projea)
 
-Ce dossier est **vide à dessein** au stade actuel (étape 1 du repo `twinl_mcps`).
+Ce dossier contient le **serveur MCP read-only en HTTPS** déployé sur le VPS, qui expose les bases
+miroirs `iafec_readonly` et `twinl_readonly` à **claude.ai (web)** via OAuth 2.1 (WorkOS AuthKit).
 
-## Pourquoi vide
+> Procédure complète de déploiement : [`../docs/INSTALL_PROCEDURE_HTTPS.md`](../docs/INSTALL_PROCEDURE_HTTPS.md).
+> Conception (sécurité, choix) : [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).
+> Le mode **stdio local** (Claude Desktop) reste documenté dans [`../docs/INSTALL_PROCEDURE.md`](../docs/INSTALL_PROCEDURE.md) — les deux coexistent.
 
-Avec seulement 2 MCPs (iafec, projea), refactor le code Python en toolkit générique serait
-de la sur-ingénierie. Le coût de maintenir 2 scripts ≈ identiques est inférieur au coût
-d'extraire un toolkit prématurément, avec le risque de mal généraliser sur 2 cas d'usage.
-
-## Quand ce dossier se remplira
-
-Au **3e MCP**. À ce moment-là, le pattern sera évident à partir de 3 cas concrets, le
-refactor sera bien dimensionné.
-
-## Structure prévue (étape 2)
+## Contenu
 
 ```
 mcps/
-├── iafec/
-│   ├── config.toml     # name, db, user, password env var, exclusions, expected_views
-│   ├── setup.sql       # DDL spécifique (déplacé depuis iafec/scripts/)
-│   └── README.md       # particularités iafec (filtres TwinL, signe comptable...)
-├── projea/
-│   ├── config.toml
-│   ├── setup.sql       # DDL spécifique (déplacé depuis projea/scripts/)
-│   └── README.md
-└── <3e MCP>/...
+├── server/
+│   ├── server.py          # serveur FastMCP générique (1 instance = 1 base, paramétré par env)
+│   ├── requirements.txt    # fastmcp, pymysql, sqlglot
+│   ├── Dockerfile          # python:3.12-slim, user non-root
+│   └── .env.example        # modèle d'env (→ iafec.env / projea.env, créés SUR LE VPS)
+├── docker-compose.yml      # 2 instances (iafec, projea), bind 127.0.0.1, réseau dédié, healthcheck
+├── deploy/
+│   └── apache-mcp.conf.example   # vhosts Apache (streaming, no-gzip, proxy 127.0.0.1:808x)
+└── iafec.env / projea.env  # secrets, créés sur le VPS, chmod 600, GITIGNORED (jamais ici)
 ```
 
-Et un `toolkit/` parallèle :
+## Modèle (1 image, 2 instances)
 
-```
-toolkit/
-├── pyproject.toml
-└── mcp_toolkit/
-    ├── verify.py       # logique générique de vérif paramétrée par config.toml
-    ├── config_writer.py # écriture claude_desktop_config.json (idempotent, avec backup)
-    └── cli.py          # CLI : "mcp-toolkit setup <nom>", "mcp-toolkit verify <nom>"
-```
+Un seul `server.py`, paramétré par variables d'environnement (`MCP_DB_*`, `AUTHKIT_DOMAIN`, `BASE_URL`,
+plafonds…). Deux instances Docker (`mcp-iafec`, `mcp-projea`), un sous-domaine chacune
+(`mcp-iafec.twinl.fr`, `mcp-projea.twinl.fr`), deux connecteurs dans claude.ai. Cohérent avec le modèle
+« un MCP par base ».
 
-Workflow d'install d'un nouveau MCP (étape 2) :
+## Sécurité — 4 couches (cf. ARCHITECTURE.md §3)
 
-```bash
-# 1. Créer mcps/<nom>/{config.toml, setup.sql}
-# 2. Lancer le SQL en root sur le VPS (manuel, comme aujourd'hui)
-# 3. CLI :
-mcp-toolkit verify <nom>
-# → verify + update claude_desktop_config.json + log clair
-# 4. Quit / restart Claude Desktop (manuel, comme aujourd'hui)
-```
+1. Vues `SQL SECURITY DEFINER` (filtrage structurel).
+2. `GRANT SELECT` only sur la DB miroir (**rempart dur** : le user RO ne peut rien muter).
+3. Garde SELECT-only **fail-closed** par AST `sqlglot`, dans `server.py` (remplace les flags `ALLOW_*`).
+4. OAuth 2.1 WorkOS AuthKit (**invite-only**, seul Laurent) + filet allowlist de sujet.
 
-## D'ici l'étape 2
+Plus : plafond lignes/octets (anti-saturation), connexion par appel + retry, logs anonymisés.
 
-Pour ajouter un MCP :
-1. Lire [`../docs/INSTALL_PROCEDURE.md`](../docs/INSTALL_PROCEDURE.md).
-2. Créer / utiliser le SQL et le verify Python dans le repo data correspondant
-   (en s'inspirant des cas iafec et projea existants).
-3. Quand le 3e MCP est en place, décider du refactor vers ce dossier.
+## Note sur l'ancien plan « toolkit générique »
+
+L'étape 2 envisageait initialement un toolkit Python paramétré par `config.toml` (refactor des
+`mcp_*_verify.py`). Le besoin réel a été le **passage en HTTPS distant** (ce serveur). Le refactor du
+verify stdio en toolkit reste possible plus tard, mais n'était pas le besoin prioritaire.

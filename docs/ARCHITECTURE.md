@@ -212,6 +212,12 @@ Pour un usage **perso, local**, le stdio est largement suffisant et beaucoup plu
 Migration possible vers HTTPS si besoin d'usage multi-machine ou depuis le web — pas
 prévu dans l'immédiat.
 
+> **Mise à jour** : le besoin d'usage depuis **claude.ai (web)** s'est concrétisé → l'option HTTPS
+> distant a été implémentée (serveur FastMCP en conteneur, OAuth 2.1 WorkOS AuthKit, façade Apache).
+> Voir [`INSTALL_PROCEDURE_HTTPS.md`](INSTALL_PROCEDURE_HTTPS.md) et [`../mcps/`](../mcps/). Le stdio
+> local **et** le HTTPS distant coexistent (clients différents). L'OAuth ajoute une **4ᵉ couche** de
+> sécurité au modèle triple-couche du §3.
+
 ---
 
 ## 8. Pourquoi pas DXT (Desktop Extensions) ?

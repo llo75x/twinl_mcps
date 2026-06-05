@@ -1,0 +1,56 @@
+# =============================================================================
+# 2 instances du serveur MCP HTTPS read-only (iafec + projea), même image.
+# Déployé sur le VPS dans /opt/twinl_mcps (compte ethan/docker).
+#
+# Sécurité réseau :
+#  - bind 127.0.0.1 UNIQUEMENT → seul Apache (façade) atteint les conteneurs ;
+#  - réseau bridge dédié `mcpnet` → isolé des conteneurs iafec ;
+#  - MariaDB tourne nativement sur l'HÔTE → atteinte via host.docker.internal:host-gateway
+#    (PAS de host-networking, qui exposerait les ports et ruinerait le bind 127.0.0.1).
+# =============================================================================
+
+services:
+
+  mcp-iafec:
+    build: ./server
+    container_name: mcp-iafec
+    restart: unless-stopped
+    env_file: ./iafec.env          # créé sur le VPS, chmod 600, gitignored
+    ports:
+      - "127.0.0.1:8081:8080"      # public via Apache → mcp-iafec.twinl.fr
+    networks: [mcpnet]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  mcp-projea:
+    build: ./server
+    container_name: mcp-projea
+    restart: unless-stopped
+    env_file: ./projea.env         # créé sur le VPS, chmod 600, gitignored
+    ports:
+      - "127.0.0.1:8082:8080"      # public via Apache → mcp-projea.twinl.fr
+    networks: [mcpnet]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+networks:
+  mcpnet:
+    driver: bridge

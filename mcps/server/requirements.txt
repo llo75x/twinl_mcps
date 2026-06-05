@@ -1,0 +1,8 @@
+# Dépendances du serveur MCP HTTPS read-only.
+# Convention iafec/OPS.md §4.1 : versions EXACTES.
+# Versions figées après build validé sur le VPS (fastmcp 2.14.7 : AuthKitProvider +
+# get_access_token + stateless_http présents ; sqlglot 26.33.0 : toutes les classes exp utilisées présentes).
+
+fastmcp==2.14.7         # AuthKitProvider + stateless_http (validés à l'import)
+pymysql==1.1.1          # version déjà en prod côté iafec backend
+sqlglot==26.33.0        # parsing AST de la garde SELECT-only

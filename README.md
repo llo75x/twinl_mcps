@@ -32,7 +32,9 @@ Conventions :
 
 | Doc | Contenu |
 |---|---|
-| [`docs/INSTALL_PROCEDURE.md`](docs/INSTALL_PROCEDURE.md) | Procédure détaillée d'installation d'un nouveau MCP (5 phases : DDL côté VPS, exécution root, vérif + config Claude Desktop, activation, test). Réutilisable pour tout nouveau MCP. |
+| [`docs/INSTALL_PROCEDURE.md`](docs/INSTALL_PROCEDURE.md) | Procédure détaillée d'installation d'un MCP en **stdio local** (5 phases : DDL côté VPS, exécution root, vérif + config Claude Desktop, activation, test). |
+| [`docs/INSTALL_PROCEDURE_HTTPS.md`](docs/INSTALL_PROCEDURE_HTTPS.md) | Procédure de déploiement d'un MCP en **serveur HTTPS distant** pour **claude.ai web** (6 phases : code, WorkOS OAuth, DNS, conteneurs, Apache/TLS, connecteurs). Code dans [`mcps/`](mcps/). |
+| [`docs/RESUME_DEPLOIEMENT_HTTPS.md`](docs/RESUME_DEPLOIEMENT_HTTPS.md) | **État/reprise** du déploiement HTTPS en cours (phases 1-4 faites, reprise en phase 5 Apache/TLS). Document de passation desktop ↔ laptop. |
 | [`docs/PITFALLS.md`](docs/PITFALLS.md) | Pièges à connaître absolument : réécriture de `claude_desktop_config.json` par CD, fichier absent quand CD est quitté, `iaFEC_admin` sans `CREATE USER`, `vps-ethan` vs `vps`, blocage harness sur passwords en clair. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Modèle sécurité triple-couche, choix DB miroir + vues `SQL SECURITY DEFINER`, statique vs procédure dynamique. |
 | [`docs/SESSION_HISTORY_2026-05.md`](docs/SESSION_HISTORY_2026-05.md) | Synthèse complète de la session 27-29 mai 2026 (création des 2 MCPs, refactor projea en repo autonome, création de ce repo). Historique frozen. |
@@ -59,9 +61,19 @@ mcps/<nom>/setup.sql      # DDL spécifique
 
 Décision déclenchée par le 3e MCP — pas avant. Le pattern sera alors évident.
 
+### Étape 2bis (en cours) — MCP HTTPS distant pour claude.ai web
+
+Déclenchée par le besoin d'interroger les bases depuis **claude.ai (web)** (multi-machine, sans poste
+local). Serveur FastMCP en conteneur sur le VPS, derrière OAuth 2.1 (WorkOS AuthKit), fronté par Apache.
+
+- ✅ Code & config (`mcps/server/`, `mcps/docker-compose.yml`, `mcps/deploy/`)
+- ✅ Procédure documentée ([`docs/INSTALL_PROCEDURE_HTTPS.md`](docs/INSTALL_PROCEDURE_HTTPS.md))
+- ⬜ Déploiement prod (WorkOS, DNS, conteneurs, Apache/TLS, connecteurs claude.ai) — à exécuter
+
 ### Étape 3 — Au-delà
 
-Selon les besoins : rotation automatisée des passwords, healthcheck, tests, conversion DXT (extensions Claude Desktop empaquetées), passage à un MCP HTTPS distant pour usage depuis claude.ai web…
+Selon les besoins : rotation automatisée des passwords, tests automatisés, conversion DXT (extensions
+Claude Desktop empaquetées), toolkit Python générique stdio…
 
 ## Comment utiliser ce repo
 
