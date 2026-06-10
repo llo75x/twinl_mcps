@@ -148,13 +148,14 @@ def _coerce(value: object) -> object:
 
 # ── Exécution avec curseur NON-bufferisé + double plafond (lignes / octets) ───
 
-def run_query(safe_sql: str) -> dict:
+def run_query(safe_sql: str, effective_max_rows: int | None = None) -> dict:
     """Ouvre une connexion COURTE (par appel), exécute en read-only, plafonne la réponse.
 
     SSCursor (non-bufferisé) : seules MAX_ROWS+1 lignes sont tirées du serveur, quelle que
     soit la taille réelle du résultat → RAM du conteneur bornée. On ferme la *connexion*
     (et non le curseur) pour abandonner le reste du flux sans le drainer.
     """
+    cap = effective_max_rows if effective_max_rows is not None else MAX_ROWS
     conn = pymysql.connect(
         host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASS, database=DB_NAME,
         cursorclass=pymysql.cursors.SSCursor,   # non-bufferisé : streaming
@@ -170,9 +171,9 @@ def run_query(safe_sql: str) -> dict:
         cur.execute(safe_sql)
 
         columns = [d[0] for d in cur.description] if cur.description else []
-        raw = cur.fetchmany(MAX_ROWS + 1)        # +1 pour détecter la troncature
-        truncated_rows = len(raw) > MAX_ROWS
-        raw = raw[:MAX_ROWS]
+        raw = cur.fetchmany(cap + 1)             # +1 pour détecter la troncature
+        truncated_rows = len(raw) > cap
+        raw = raw[:cap]
 
         rows: list[dict] = []
         size = 0
@@ -354,26 +355,37 @@ def mysql_query(sql: str, extract_password: str | None = None) -> dict:
     subject = _check_subject()
     safe_sql, anon_sql = validate_read_only(sql)
 
-    # Bloquer la pagination de contournement : OFFSET > 0 sans mot de passe
-    if MCP_EXTRACT_PASSWORD and _has_offset(safe_sql) and extract_password != MCP_EXTRACT_PASSWORD:
+    # Sans mot de passe valide : plafonner durement à SLACK_NOTIFY_THRESHOLD lignes.
+    # Bloquer OFFSET > 0 aussi (inutile de paginer si chaque appel est plafonné).
+    password_ok = (not MCP_EXTRACT_PASSWORD) or (extract_password == MCP_EXTRACT_PASSWORD)
+    if not password_ok and _has_offset(safe_sql):
         log.warning("offset query blocked (pagination bypass) | sub=%s | sql=%s", subject, anon_sql)
         return {
             "error": "confirmation_required",
             "message": (
                 f"Les requêtes avec OFFSET sont considérées comme des extractions volumineuses "
                 f"(seuil : {SLACK_NOTIFY_THRESHOLD} lignes). "
-                f"Pour confirmer, relancez avec le paramètre `extract_password`. "
-                f"Demandez ce mot de passe à l'utilisateur — ne tentez pas de paginer sans lui."
+                f"Demandez le mot de passe d'extraction à l'utilisateur et relancez avec "
+                f"`extract_password` — ne tentez pas de paginer sans lui."
             ),
         }
+    # Sans mot de passe valide : plafond dur à SLACK_NOTIFY_THRESHOLD (rend la fragmentation inutile).
+    effective_max = None if password_ok else SLACK_NOTIFY_THRESHOLD
     try:
-        result = run_query(safe_sql)
+        result = run_query(safe_sql, effective_max_rows=effective_max)
     except pymysql.OperationalError as e:
         # Reconnexion / coupure DB : un retry, sinon erreur MCP propre (le process ne crashe pas).
         log.warning("OperationalError, retry once: %s", e.args[0] if e.args else e)
-        result = run_query(safe_sql)
-    log.info("query ok | sub=%s | rows=%s | trunc=%s | sql=%s",
-             subject, result["row_count"], result["truncated"], anon_sql)
+        result = run_query(safe_sql, effective_max_rows=effective_max)
+    # Enrichir le message de troncature quand c'est le seuil d'extraction qui s'applique
+    if not password_ok and result.get("truncated"):
+        result["note"] = (
+            f"Résultat plafonné à {SLACK_NOTIFY_THRESHOLD} lignes (seuil d'extraction sans mot de passe). "
+            f"Pour obtenir l'intégralité des données, demandez le mot de passe d'extraction à "
+            f"l'utilisateur et relancez avec le paramètre `extract_password`."
+        )
+    log.info("query ok | sub=%s | rows=%s | trunc=%s | pwd_ok=%s | sql=%s",
+             subject, result["row_count"], result["truncated"], password_ok, anon_sql)
     if MCP_EXTRACT_PASSWORD and result["row_count"] > SLACK_NOTIFY_THRESHOLD:
         if extract_password != MCP_EXTRACT_PASSWORD:
             log.warning("large extract blocked | sub=%s | rows=%s | password_provided=%s",
