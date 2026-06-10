@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import urllib.request
 
 import pymysql
 import pymysql.cursors
@@ -52,6 +53,10 @@ INSTRUCTIONS_INLINE = os.environ.get("MCP_INSTRUCTIONS", "")
 BIND_HOST = os.environ.get("MCP_BIND_HOST", "0.0.0.0")         # 0.0.0.0 DANS le conteneur : l'isolation
                                                                 # vient du bind hôte 127.0.0.1:80xx (compose)
 MAX_ROWS = int(os.environ.get("MCP_MAX_ROWS", "1000"))         # plancher dur de protection
+
+SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
+SLACK_NOTIFY_THRESHOLD = int(os.environ.get("SLACK_NOTIFY_THRESHOLD", "200"))
+MCP_EXTRACT_PASSWORD = os.environ.get("MCP_EXTRACT_PASSWORD", "").strip()
 MAX_BYTES = int(os.environ.get("MCP_MAX_BYTES", "1000000"))    # ~1 Mo de payload max
 STMT_TIMEOUT_S = float(os.environ.get("MCP_STMT_TIMEOUT_S", "20"))  # MariaDB max_statement_time (secondes)
 
@@ -192,6 +197,34 @@ def run_query(safe_sql: str) -> dict:
     return result
 
 
+# ── Notification Slack (best-effort, n'interrompt jamais la réponse) ──────────
+
+def _notify_slack_large_result(row_count: int, truncated: bool) -> None:
+    """Envoie une notification Slack si le résultat dépasse SLACK_NOTIFY_THRESHOLD."""
+    if not SLACK_WEBHOOK_URL:
+        return
+    trunc_note = " _(résultat tronqué par MAX_ROWS)_" if truncated else ""
+    text = (
+        f":bar_chart: *MCP Projea — résultat volumineux*\n"
+        f"Une requête a retourné *{row_count} lignes* (seuil : {SLACK_NOTIFY_THRESHOLD}){trunc_note}.\n"
+        f"Si tu attendais un export CSV/Excel, le fichier est peut-être incomplet."
+    )
+    payload = json.dumps({"text": text}).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            SLACK_WEBHOOK_URL,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            status = resp.status
+        if status != 200:
+            log.warning("slack notify: unexpected status %s", status)
+    except Exception as e:
+        log.warning("slack notify failed (non-bloquant): %s", type(e).__name__)
+
+
 # ── Serveur FastMCP ───────────────────────────────────────────────────────────
 
 from fastmcp import FastMCP                                          # [FASTMCP-API]
@@ -294,7 +327,7 @@ else:
 
 
 @mcp.tool(description=_MYSQL_QUERY_DESC)                              # [FASTMCP-API]
-def mysql_query(sql: str) -> dict:
+def mysql_query(sql: str, extract_password: str | None = None) -> dict:
     # Description réelle = _MYSQL_QUERY_DESC (digest métier inclus). Docstring courte pour le lecteur.
     """Exécute un SELECT read-only ; voir _MYSQL_QUERY_DESC pour la description exposée au modèle."""
     subject = _check_subject()
@@ -307,6 +340,22 @@ def mysql_query(sql: str) -> dict:
         result = run_query(safe_sql)
     log.info("query ok | sub=%s | rows=%s | trunc=%s | sql=%s",
              subject, result["row_count"], result["truncated"], anon_sql)
+    if MCP_EXTRACT_PASSWORD and result["row_count"] > SLACK_NOTIFY_THRESHOLD:
+        if extract_password != MCP_EXTRACT_PASSWORD:
+            log.warning("large extract blocked | sub=%s | rows=%s | password_provided=%s",
+                        subject, result["row_count"], bool(extract_password))
+            return {
+                "error": "confirmation_required",
+                "message": (
+                    f"Cette requête retourne {result['row_count']} lignes "
+                    f"(seuil configuré : {SLACK_NOTIFY_THRESHOLD}). "
+                    f"Pour confirmer l'extraction, relancez la même requête en fournissant "
+                    f"le paramètre `extract_password`. Demandez ce mot de passe à l'utilisateur."
+                ),
+                "row_count": result["row_count"],
+            }
+    if result["row_count"] > SLACK_NOTIFY_THRESHOLD:
+        _notify_slack_large_result(result["row_count"], result["truncated"])
     return result
 
 
