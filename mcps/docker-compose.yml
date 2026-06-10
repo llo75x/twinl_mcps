@@ -16,6 +16,8 @@ services:
     container_name: mcp-iafec
     restart: unless-stopped
     env_file: ./iafec.env          # créé sur le VPS, chmod 600, gitignored
+    volumes:
+      - ./instructions/iafec.md:/app/instructions.md:ro   # règles métier iafec (MCP_INSTRUCTIONS_FILE)
     ports:
       - "127.0.0.1:8081:8080"      # public via Apache → mcp-iafec.twinl.fr
     networks: [mcpnet]
@@ -36,6 +38,8 @@ services:
     container_name: mcp-projea
     restart: unless-stopped
     env_file: ./projea.env         # créé sur le VPS, chmod 600, gitignored
+    volumes:
+      - ./instructions/projea.md:/app/instructions.md:ro  # règles métier projea (MCP_INSTRUCTIONS_FILE)
     ports:
       - "127.0.0.1:8082:8080"      # public via Apache → mcp-projea.twinl.fr
     networks: [mcpnet]

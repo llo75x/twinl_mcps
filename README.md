@@ -61,14 +61,30 @@ mcps/<nom>/setup.sql      # DDL spécifique
 
 Décision déclenchée par le 3e MCP — pas avant. Le pattern sera alors évident.
 
-### Étape 2bis (en cours) — MCP HTTPS distant pour claude.ai web
+### Étape 2bis (✅ déployé le 6 juin 2026) — MCP HTTPS distant pour claude.ai web
 
 Déclenchée par le besoin d'interroger les bases depuis **claude.ai (web)** (multi-machine, sans poste
 local). Serveur FastMCP en conteneur sur le VPS, derrière OAuth 2.1 (WorkOS AuthKit), fronté par Apache.
 
 - ✅ Code & config (`mcps/server/`, `mcps/docker-compose.yml`, `mcps/deploy/`)
 - ✅ Procédure documentée ([`docs/INSTALL_PROCEDURE_HTTPS.md`](docs/INSTALL_PROCEDURE_HTTPS.md))
-- ⬜ Déploiement prod (WorkOS, DNS, conteneurs, Apache/TLS, connecteurs claude.ai) — à exécuter
+- ✅ Déploiement prod **terminé** — WorkOS, DNS, conteneurs, Apache/TLS, connecteurs `mcp-iafec` + `mcp-projea` connectés sur claude.ai (cf. [`docs/RESUME_DEPLOIEMENT_HTTPS.md`](docs/RESUME_DEPLOIEMENT_HTTPS.md))
+
+### Étape 2ter — Règles métier livrées via le champ MCP `instructions` (une source, lue partout)
+
+Chaque MCP délivre ses règles métier + data model via le **champ standard `instructions`** du serveur
+(`server.py` → `FastMCP(instructions=…)`), donc lu **automatiquement** par tout client (claude.ai web,
+Claude Desktop, Cowork, Claude Code). Une seule source par instance, dans [`mcps/instructions/`](mcps/instructions/)
+(`projea.md`, `iafec.md`), montée en lecture seule dans le conteneur. Objectif : supprimer la divergence
+cowork/web et le serveur stdio tiers (`@benborla29/mcp-server-mysql`), au profit du **connecteur HTTPS
+unique** ajouté sur chaque surface.
+
+- ✅ Mécanisme dans `server.py` + montage `docker-compose.yml`
+- ✅ Règles Projea (`mcps/instructions/projea.md`) — merge `skill_MCP_projea.md` + synthèse cowork emailing/ESN
+- ✅ Règles iafec (`mcps/instructions/iafec.md`) — repris de `skill_MCP_iafec.md`
+- ⬜ Redéploiement conteneurs `mcp-projea` + `mcp-iafec` sur le VPS (pour activer la livraison)
+- ✅ Source de vérité = `mcps/instructions/` (décision A) ; `skill_MCP_*.md` des repos data réduits à des pointeurs
+- ⬜ Migration Desktop/Cowork/Claude Code vers le connecteur HTTPS (retrait du serveur tiers stdio)
 
 ### Étape 3 — Au-delà
 

@@ -41,6 +41,13 @@ BASE_URL = os.environ["BASE_URL"]               # ex. https://mcp-iafec.twinl.fr
 SERVER_NAME = os.environ.get("MCP_SERVER_NAME", "mcp-readonly")
 MCP_PORT = int(os.environ.get("MCP_PORT", "8080"))
 
+# Instructions du serveur (champ MCP standard, lu automatiquement par TOUT client : claude.ai
+# web, Claude Desktop, Cowork, Claude Code). PAR INSTANCE → projea ≠ iafec, jamais mélangés.
+# Source : un fichier monté dans le conteneur (MCP_INSTRUCTIONS_FILE), sinon inline
+# (MCP_INSTRUCTIONS). Absent = pas d'instructions (rétro-compatible).
+INSTRUCTIONS_FILE = os.environ.get("MCP_INSTRUCTIONS_FILE", "/app/instructions.md").strip()
+INSTRUCTIONS_INLINE = os.environ.get("MCP_INSTRUCTIONS", "")
+
 BIND_HOST = os.environ.get("MCP_BIND_HOST", "0.0.0.0")         # 0.0.0.0 DANS le conteneur : l'isolation
                                                                 # vient du bind hôte 127.0.0.1:80xx (compose)
 MAX_ROWS = int(os.environ.get("MCP_MAX_ROWS", "1000"))         # plancher dur de protection
@@ -189,9 +196,38 @@ def run_query(safe_sql: str) -> dict:
 from fastmcp import FastMCP                                          # [FASTMCP-API]
 from fastmcp.server.auth.providers.workos import AuthKitProvider     # [FASTMCP-API]
 
+def _load_instructions() -> str | None:
+    """Charge les instructions de l'instance : fichier monté en priorité, sinon inline.
+
+    Fail-soft : un fichier illisible ne fait PAS crasher le serveur (les instructions sont un
+    confort, pas un prérequis au fonctionnement). On loggue la longueur, jamais le contenu.
+    """
+    if INSTRUCTIONS_FILE:
+        try:
+            with open(INSTRUCTIONS_FILE, encoding="utf-8") as f:
+                text = f.read().strip()
+            if text:
+                log.info("instructions loaded from file (%s chars)", len(text))
+                return text
+            log.warning("instructions file is empty: %s", INSTRUCTIONS_FILE)
+        except OSError as e:
+            log.warning("instructions file unreadable (%s): %s", INSTRUCTIONS_FILE, type(e).__name__)
+    if INSTRUCTIONS_INLINE.strip():
+        text = INSTRUCTIONS_INLINE.strip()
+        log.info("instructions loaded from env inline (%s chars)", len(text))
+        return text
+    log.info("no instructions configured for this instance")
+    return None
+
+
+SERVER_INSTRUCTIONS = _load_instructions()
+
 auth = AuthKitProvider(authkit_domain=AUTHKIT_DOMAIN, base_url=BASE_URL)   # [FASTMCP-API]
 # stateless_http=True : pas de session SSE persistante (critique avec Apache mpm_prefork).
-mcp = FastMCP(name=SERVER_NAME, auth=auth, stateless_http=True)            # [FASTMCP-API]
+# instructions : champ MCP standard, surfacé au client à la connexion (cf. _load_instructions).
+mcp = FastMCP(                                                            # [FASTMCP-API]
+    name=SERVER_NAME, auth=auth, stateless_http=True, instructions=SERVER_INSTRUCTIONS,
+)
 
 
 def _check_subject() -> str | None:
