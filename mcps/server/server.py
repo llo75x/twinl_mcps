@@ -310,7 +310,12 @@ _MYSQL_QUERY_BASE_DESC = (
     "Exécute une requête SQL **en lecture seule** sur la base miroir read-only.\n\n"
     "Seules les requêtes de lecture (SELECT, y compris CTE WITH/UNION, SHOW, DESCRIBE) sont "
     "autorisées. Les réponses sont plafonnées (lignes et octets) ; si « truncated » est vrai, "
-    "affine la requête (agrège ou filtre) plutôt que de tout re-tirer."
+    "affine la requête (agrège ou filtre) plutôt que de tout re-tirer.\n\n"
+    "⛔ INTERDIT — contournement du seuil d'extraction : ne jamais paginer (OFFSET) ni "
+    "fragmenter une requête en plusieurs appels pour dépasser le seuil sans fournir "
+    "`extract_password`. Toute requête avec OFFSET > 0 exige le mot de passe. "
+    "Si l'utilisateur demande un export volumineux, demande-lui le mot de passe d'extraction "
+    "et fournis-le dans UN SEUL appel avec `extract_password`."
 )
 if TOOL_DIGEST:
     _MYSQL_QUERY_DESC = (
@@ -326,12 +331,41 @@ else:
     _MYSQL_QUERY_DESC = _MYSQL_QUERY_BASE_DESC
 
 
+def _has_offset(sql: str) -> bool:
+    """Détecte la présence d'un OFFSET > 0 dans la requête (pagination de contournement)."""
+    try:
+        stmts = [s for s in sqlglot.parse(sql, read="mysql") if s is not None]
+        if len(stmts) != 1:
+            return False
+        offset_node = stmts[0].args.get("offset")
+        if offset_node is None:
+            return False
+        # OFFSET 0 est inoffensif — on ne bloque que les vrais sauts de page
+        val = offset_node.this if hasattr(offset_node, "this") else offset_node
+        return int(getattr(val, "this", 0) or 0) > 0
+    except Exception:
+        return False  # fail-open sur la détection (le blocage dur reste le seuil de lignes)
+
+
 @mcp.tool(description=_MYSQL_QUERY_DESC)                              # [FASTMCP-API]
 def mysql_query(sql: str, extract_password: str | None = None) -> dict:
     # Description réelle = _MYSQL_QUERY_DESC (digest métier inclus). Docstring courte pour le lecteur.
     """Exécute un SELECT read-only ; voir _MYSQL_QUERY_DESC pour la description exposée au modèle."""
     subject = _check_subject()
     safe_sql, anon_sql = validate_read_only(sql)
+
+    # Bloquer la pagination de contournement : OFFSET > 0 sans mot de passe
+    if MCP_EXTRACT_PASSWORD and _has_offset(safe_sql) and extract_password != MCP_EXTRACT_PASSWORD:
+        log.warning("offset query blocked (pagination bypass) | sub=%s | sql=%s", subject, anon_sql)
+        return {
+            "error": "confirmation_required",
+            "message": (
+                f"Les requêtes avec OFFSET sont considérées comme des extractions volumineuses "
+                f"(seuil : {SLACK_NOTIFY_THRESHOLD} lignes). "
+                f"Pour confirmer, relancez avec le paramètre `extract_password`. "
+                f"Demandez ce mot de passe à l'utilisateur — ne tentez pas de paginer sans lui."
+            ),
+        }
     try:
         result = run_query(safe_sql)
     except pymysql.OperationalError as e:
