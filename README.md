@@ -84,7 +84,7 @@ unique** ajouté sur chaque surface.
 - ✅ Règles iafec (`mcps/instructions/iafec.md`) — repris de `skill_MCP_iafec.md`
 - ⬜ Redéploiement conteneurs `mcp-projea` + `mcp-iafec` sur le VPS (pour activer la livraison)
 - ✅ Source de vérité = `mcps/instructions/` (décision A) ; `skill_MCP_*.md` des repos data réduits à des pointeurs
-- ⬜ Migration Desktop/Cowork/Claude Code vers le connecteur HTTPS (retrait du serveur tiers stdio)
+- ✅ Migration Desktop/Cowork vers le connecteur HTTPS — serveurs stdio tiers `@benborla29/mcp-server-mysql` retirés de `claude_desktop_config.json` (le connecteur HTTPS unique sert désormais toutes les surfaces)
 
 ### Étape 3 — Au-delà
 
