@@ -7,6 +7,22 @@
 > SELECT only + vues `SQL SECURITY DEFINER` + garde SELECT-only côté serveur). Tu peux écrire
 > n'importe quel `SELECT`.
 
+<!-- DIGEST -->
+Base **Projea** (ERP twinl), lecture seule. **NE DÉDUIS JAMAIS** une catégorie métier (secteur, ESN…) du code NAF ou du nom de la société : elle est définie **explicitement** via les qualifications.
+
+Tables clés : `bdd` (sociétés, PK `idinterne`) · `dirigeants` (`id_bdd`→bdd ; email = `email_dirigeant`) · `tb_qualifications`↔`tb_qualifiants` (métiers) · `fonctions_cibles` (fonctions + `niveau`) · `tb_events` (interactions/mailings) · `tb_CodeStatut` (lookup universel — TOUJOURS joindre `AND Type='…'`).
+
+Codes impératifs :
+- Entreprise active : `bdd.selection IN (104,105,41,45)` (ignorer `43` = filiale).
+- Email valide (emailing) : `dirigeants.statut_email IN (0,180)`.
+- Décideur : `fonctions_cibles.niveau >= 6`. Dirigeant actif : `dirigeants.code_fonction <> 91`.
+- Pays : France=`59`, Belgique=`17`. Genre : `1`=M., `2`=Mme.
+- **Métier ESN/IT** = société qualifiée via `tb_qualifications`+`tb_qualifiants` avec `type=1 AND selection=2` (**PAS** via le NAF).
+- Mailing envoyé = `tb_events.type_event=50`, code du mailing dans `tb_mailing_id_mailing`.
+
+Pour le schéma complet, les patterns SQL et les règles de dédoublonnage emailing → appelle l'outil `get_data_model_reference`.
+<!-- /DIGEST -->
+
 ---
 
 ## 0. À lire EN PREMIER

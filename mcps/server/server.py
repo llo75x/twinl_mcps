@@ -22,6 +22,7 @@ import decimal
 import json
 import logging
 import os
+import re
 
 import pymysql
 import pymysql.cursors
@@ -222,9 +223,30 @@ def _load_instructions() -> str | None:
 
 SERVER_INSTRUCTIONS = _load_instructions()
 
+
+def _extract_digest(instructions: str | None) -> str | None:
+    """Digest court = bloc entre `<!-- DIGEST -->` et `<!-- /DIGEST -->` du fichier d'instructions.
+
+    Pourquoi : certains clients MCP (dont claude.ai web) n'exposent PAS le champ `instructions` au
+    modèle. En revanche, TOUS exposent la DESCRIPTION des outils. On injecte donc ce digest dans la
+    description de `mysql_query` (garde-fou anti-improvisation, à coût réduit par requête), le data
+    model complet restant disponible via l'outil `get_data_model_reference`.
+    """
+    if not instructions:
+        return None
+    m = re.search(r"<!--\s*DIGEST\s*-->(.*?)<!--\s*/DIGEST\s*-->", instructions, re.DOTALL)
+    return m.group(1).strip() if m else None
+
+
+TOOL_DIGEST = _extract_digest(SERVER_INSTRUCTIONS)
+if TOOL_DIGEST:
+    log.info("tool digest extracted (%s chars)", len(TOOL_DIGEST))
+
 auth = AuthKitProvider(authkit_domain=AUTHKIT_DOMAIN, base_url=BASE_URL)   # [FASTMCP-API]
 # stateless_http=True : pas de session SSE persistante (critique avec Apache mpm_prefork).
-# instructions : champ MCP standard, surfacé au client à la connexion (cf. _load_instructions).
+# instructions : champ MCP standard. ATTENTION : claude.ai web ne le surface PAS au modèle ; il
+# n'est utile qu'aux clients qui l'exposent (ex. Claude Code). Le canal FIABLE cross-client est la
+# description d'outil (cf. _MYSQL_QUERY_DESC + get_data_model_reference).
 mcp = FastMCP(                                                            # [FASTMCP-API]
     name=SERVER_NAME, auth=auth, stateless_http=True, instructions=SERVER_INSTRUCTIONS,
 )
@@ -251,14 +273,30 @@ def _check_subject() -> str | None:
     return subject or None
 
 
-@mcp.tool
-def mysql_query(sql: str) -> dict:
-    """Exécute une requête SQL **en lecture seule** sur la base miroir read-only.
+_MYSQL_QUERY_BASE_DESC = (
+    "Exécute une requête SQL **en lecture seule** sur la base miroir read-only.\n\n"
+    "Seules les requêtes de lecture (SELECT, y compris CTE WITH/UNION, SHOW, DESCRIBE) sont "
+    "autorisées. Les réponses sont plafonnées (lignes et octets) ; si « truncated » est vrai, "
+    "affine la requête (agrège ou filtre) plutôt que de tout re-tirer."
+)
+if TOOL_DIGEST:
+    _MYSQL_QUERY_DESC = (
+        _MYSQL_QUERY_BASE_DESC
+        + "\n\n=== Règles métier essentielles de CETTE base (résumé — NE PAS improviser) ===\n"
+        + TOOL_DIGEST
+        + "\n\n⚠️ Pour le data model COMPLET (catalogue des tables, colonnes, patterns SQL, codes "
+        "détaillés), appelle l'outil `get_data_model_reference` AVANT de composer une requête non "
+        "triviale. Ne devine jamais un nom de table/colonne ni une catégorie métier (secteur, "
+        "métier, statut…) à partir de données brutes — le référentiel les définit explicitement."
+    )
+else:
+    _MYSQL_QUERY_DESC = _MYSQL_QUERY_BASE_DESC
 
-    Seules les requêtes de lecture (SELECT, y compris CTE WITH/UNION, SHOW, DESCRIBE) sont
-    autorisées. Les réponses sont plafonnées (lignes et octets) ; si « truncated » est vrai,
-    affine la requête (agrège ou filtre) plutôt que de tout re-tirer.
-    """
+
+@mcp.tool(description=_MYSQL_QUERY_DESC)                              # [FASTMCP-API]
+def mysql_query(sql: str) -> dict:
+    # Description réelle = _MYSQL_QUERY_DESC (digest métier inclus). Docstring courte pour le lecteur.
+    """Exécute un SELECT read-only ; voir _MYSQL_QUERY_DESC pour la description exposée au modèle."""
     subject = _check_subject()
     safe_sql, anon_sql = validate_read_only(sql)
     try:
@@ -270,6 +308,20 @@ def mysql_query(sql: str) -> dict:
     log.info("query ok | sub=%s | rows=%s | trunc=%s | sql=%s",
              subject, result["row_count"], result["truncated"], anon_sql)
     return result
+
+
+# Outil de référence : exposé UNIQUEMENT si des instructions sont configurées pour l'instance.
+# C'est le canal FIABLE pour livrer le data model complet à tous les clients (la description de cet
+# outil + son retour sont toujours accessibles au modèle, même quand le champ `instructions` ne l'est pas).
+if SERVER_INSTRUCTIONS:
+
+    @mcp.tool                                                        # [FASTMCP-API]
+    def get_data_model_reference() -> str:
+        """Renvoie le data model COMPLET et les règles métier de cette base : schéma des tables et
+        colonnes, codes/énumérations, conventions, patterns SQL, règles de dédoublonnage. À appeler
+        AVANT de composer des requêtes non triviales — il définit les noms exacts et la sémantique
+        métier. Ne devine jamais une table/colonne ou une catégorie métier : consulte cette référence."""
+        return SERVER_INSTRUCTIONS
 
 
 # ── Route /health (hors MCP, non authentifiée) pour le healthcheck Docker ─────

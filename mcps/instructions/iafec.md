@@ -8,6 +8,20 @@
 > Logique métier détaillée (PCG, R&R, consolidation, plan analytique, bugs résolus) : `skill_FEC.md`
 > dans le repo `iafec`.
 
+<!-- DIGEST -->
+Base **iaFEC** (analyse de liasses FEC), lecture seule.
+
+Conventions critiques :
+- Signe : `net = debit_amount − credit_amount`. Un compte de passif / produit est **négatif** en base (capital social 100k → `-100000`) : c'est NORMAL, ne « corrige » pas le signe.
+- Comptes tiers 40x (fournisseurs) / 41x (clients) : clé d'agrégation **composite** `(account_number, aux_account_number)`, jamais `account_number` seul.
+- Groupe TwinL (`id=5`) masqué par les vues.
+- Exercices exploitables : `exercises.status IN ('IMPORTED','VALIDATED')`.
+
+Privilégie les tables **pré-calculées** : `statement_lines` (bilan/CR, `net_amount` déjà signé), `financial_metrics` (KPI via `metric_code` : CA, EBE, BFR, CAF…), `account_balances` (soldes par compte/tiers) — plutôt que d'agréger `accounting_entries` (611k lignes ; toujours filtrer par exercice/import).
+
+Pour le schéma complet (21 vues), les codes KPI, les préfixes PCG et les patterns SQL → appelle l'outil `get_data_model_reference`.
+<!-- /DIGEST -->
+
 ---
 
 ## 0. À lire EN PREMIER — les 3 conventions à ne JAMAIS oublier
