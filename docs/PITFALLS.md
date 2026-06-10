@@ -326,3 +326,66 @@ Mineur mais utile à savoir : si un cert Let's Encrypt a déjà été émis sur 
 quel domaine), le compte LE est en cache local. Du coup `certbot certonly --apache -d <new>`
 peut être lancé en `--non-interactive --agree-tos --keep-until-expiring` sans devoir refournir
 d'email — utile pour scripter le bloc Phase 5 en une seule passe sudo.
+
+---
+
+## 16. ⚠️ claude.ai web n'expose PAS le champ MCP `instructions` au modèle
+
+**Le piège qui a coûté le plus de temps sur la livraison des règles métier (session 2026-06-10).**
+
+Le champ standard `instructions` du serveur MCP (`FastMCP(instructions=…)`) est bien envoyé dans
+la réponse `initialize` — **mais claude.ai web ne l'injecte pas dans le contexte du modèle.**
+Symptôme observé : le connecteur se connecte, `mysql_query` marche, mais le modèle **improvise**
+(ex. tenter de déduire le métier « ESN » à partir du code NAF, au lieu de savoir qu'ESN =
+`tb_qualifiants.selection=2`). Les logs serveur confirmaient pourtant `instructions loaded from
+file (NNNN chars)` → le problème est **côté client, pas serveur**.
+
+### Le canal FIABLE cross-client = la DESCRIPTION d'outil
+
+Tous les clients MCP transmettent au modèle la **description des outils** (et leur valeur de
+retour). Donc on livre les règles par là, pas par `instructions` :
+
+1. **Digest** des règles essentielles (bloc `<!-- DIGEST -->…<!-- /DIGEST -->` en tête du fichier
+   d'instructions) injecté dans la **description de `mysql_query`** → toujours vu par le modèle,
+   garde-fou anti-improvisation, coût réduit par requête.
+2. Outil **`get_data_model_reference()`** qui renvoie le data model COMPLET, exposé seulement si
+   des instructions sont configurées ; la description de `mysql_query` invite à l'appeler avant
+   toute requête non triviale.
+3. On garde `instructions=` en plus — utile aux clients qui *le* surfacent (ex. Claude Code).
+
+Implémenté dans [`mcps/server/server.py`](../mcps/server/server.py) (`_extract_digest`,
+`_MYSQL_QUERY_DESC`, `get_data_model_reference`). Validé sur claude.ai le 2026-06-10.
+
+> Important : la liste d'outils et leurs descriptions sont récupérées **à la connexion** du
+> connecteur. Après modif, **déconnecter/reconnecter le connecteur** (ou ouvrir une nouvelle
+> conversation) côté claude.ai pour que le nouvel outil et le digest soient pris en compte.
+
+---
+
+## 17. ⚠️ `scp` multi-sources vers un dossier APLATIT les chemins → build silencieusement périmé
+
+En déployant (`scp -r mcps\instructions mcps\server\server.py mcps\docker-compose.yml vps:/opt/.../mcps/`),
+`scp` copie **chaque source par son basename dans le dossier cible**. Donc `mcps\server\server.py`
+atterrit dans `…/mcps/server.py` (à plat), **pas** dans `…/mcps/server/server.py` (le contexte de
+build du Dockerfile). Résultat : `docker compose up -d --build` reconstruit avec **l'ancien**
+`server.py`, sans aucune erreur — le bug est invisible jusqu'au test fonctionnel.
+
+### Symptôme & diagnostic
+
+Le conteneur tourne du code périmé alors que « tout a été poussé ». Vérifier le code RÉELLEMENT
+embarqué (pas seulement le fichier hôte) :
+
+```bash
+docker exec mcp-projea grep -c '<un marqueur du nouveau code>' /app/server.py   # 0 = périmé
+docker image inspect mcps-mcp-projea --format '{{.Created}}'                     # date du build
+```
+
+### La règle
+
+Pour un fichier précis, donner la **destination complète explicite**, jamais un dossier :
+
+```powershell
+scp mcps\server\server.py vps-ethan:/opt/twinl_mcps/mcps/server/server.py   # ✅ chemin complet
+```
+
+Les dossiers (`scp -r mcps\instructions`) sont OK car le basename = le bon dossier cible.
