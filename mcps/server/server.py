@@ -32,7 +32,6 @@ import logging
 import os
 import re
 import secrets
-import threading
 import time
 import urllib.parse
 import urllib.request
@@ -227,11 +226,18 @@ def run_query(safe_sql: str) -> dict:
 
 
 # ── Approbation interactive Slack ─────────────────────────────────────────────
+#
+# Architecture non-bloquante (évite le timeout du tool call claude.ai) :
+#   1. mysql_query détecte résultat volumineux → envoie message Slack → retourne token
+#   2. Claude appelle check_extraction_approval(token) toutes les ~10s
+#   3. /slack/action reçoit le clic → marque approved/denied dans _pending_store
+#   4. check_extraction_approval retourne les données si approuvé, erreur si refusé
+#
+# Clé : token aléatoire.
+# Valeur : {"result": dict, "approved": bool|None, "expires_at": float}
+_pending_store: dict[str, dict] = {}
 
-# État en mémoire des demandes d'approbation en cours.
-# Clé : request_id (token aléatoire). Valeur : threading.Event (signalé par /slack/action).
-_pending_approvals: dict[str, threading.Event] = {}
-_approval_results: dict[str, bool] = {}   # True = approuvé, False = refusé
+PENDING_TTL_S = int(os.environ.get("SLACK_APPROVAL_TIMEOUT_S", "300"))  # réutilise la var
 
 
 def _slack_approval_active() -> bool:
@@ -243,6 +249,14 @@ def _is_large_result(result: dict) -> bool:
         result["row_count"] > SLACK_NOTIFY_THRESHOLD
         or result["byte_size"] > SLACK_BYTES_THRESHOLD
     )
+
+
+def _purge_expired() -> None:
+    """Nettoie les entrées expirées (appelé à chaque check)."""
+    now = time.time()
+    expired = [k for k, v in _pending_store.items() if v["expires_at"] < now]
+    for k in expired:
+        _pending_store.pop(k, None)
 
 
 def _post_to_url(url: str, payload: dict, timeout: int = 5) -> None:
@@ -321,21 +335,6 @@ def _verify_slack_signature(body: bytes, timestamp: str, signature: str) -> bool
         return hmac.compare_digest(expected, signature)
     except Exception:
         return False
-
-
-def _wait_for_approval(request_id: str) -> bool:
-    """Bloque jusqu'à approbation/refus ou timeout. Retourne True si approuvé."""
-    event = threading.Event()
-    _pending_approvals[request_id] = event
-    try:
-        approved_in_time = event.wait(timeout=SLACK_APPROVAL_TIMEOUT_S)
-        if not approved_in_time:
-            log.warning("slack approval timeout | request_id=%s", request_id)
-            return False
-        return _approval_results.get(request_id, False)
-    finally:
-        _pending_approvals.pop(request_id, None)
-        _approval_results.pop(request_id, None)
 
 
 # ── Serveur FastMCP ───────────────────────────────────────────────────────────
@@ -460,29 +459,59 @@ def mysql_query(sql: str) -> dict:
              subject, result["row_count"], result["byte_size"], result["truncated"], anon_sql)
 
     if _slack_approval_active() and _is_large_result(result):
-        request_id = secrets.token_urlsafe(16)
-        log.info("large result — slack approval required | request_id=%s | rows=%s | bytes=%s",
-                 request_id, result["row_count"], result["byte_size"])
-        sent = _send_slack_approval_request(request_id, result["row_count"], result["byte_size"])
-        if not sent:
-            return {
-                "error": "approval_unavailable",
-                "message": "Extraction volumineuse mais la notification Slack a échoué. Réessaie.",
-            }
-        approved = _wait_for_approval(request_id)
-        if not approved:
-            log.warning("large extract denied or timed out | request_id=%s", request_id)
-            return {
-                "error": "extraction_denied",
-                "message": (
-                    f"Extraction refusée ou délai dépassé ({SLACK_APPROVAL_TIMEOUT_S}s). "
-                    f"La demande a été envoyée sur Slack — clique sur Approuver pour autoriser."
-                ),
-                "row_count": result["row_count"],
-            }
-        log.info("large extract approved | request_id=%s", request_id)
+        token = secrets.token_urlsafe(16)
+        log.info("large result — slack approval pending | token=%s | rows=%s | bytes=%s",
+                 token, result["row_count"], result["byte_size"])
+        _pending_store[token] = {
+            "result": result,
+            "approved": None,
+            "expires_at": time.time() + PENDING_TTL_S,
+        }
+        _send_slack_approval_request(token, result["row_count"], result["byte_size"])
+        return {
+            "status": "approval_pending",
+            "approval_token": token,
+            "row_count": result["row_count"],
+            "message": (
+                f"Cette extraction ({result['row_count']} lignes / "
+                f"{result['byte_size'] // 1024} Ko) dépasse les seuils configurés. "
+                f"Une demande d'approbation a été envoyée sur Slack. "
+                f"Attends quelques secondes puis appelle "
+                f"`check_extraction_approval(token='{token}')` pour vérifier si "
+                f"elle a été approuvée. Ne relance PAS mysql_query."
+            ),
+        }
 
     return result
+
+
+@mcp.tool                                                          # [FASTMCP-API]
+def check_extraction_approval(token: str) -> dict:
+    """Vérifie si une extraction volumineuse en attente d'approbation Slack a été approuvée.
+
+    Appelle cet outil toutes les 10-15 secondes après avoir reçu `approval_pending` de
+    `mysql_query`. Retourne les données si approuvé, une erreur si refusé ou expiré.
+    Ne relance JAMAIS `mysql_query` sans approbation explicite de l'utilisateur.
+    """
+    _purge_expired()
+    entry = _pending_store.get(token)
+    if entry is None:
+        return {
+            "status": "expired",
+            "message": "Token inconnu ou expiré. L'approbation n'a pas été donnée à temps.",
+        }
+    approved = entry["approved"]
+    if approved is None:
+        return {
+            "status": "pending",
+            "message": "Approbation en attente sur Slack — réessaie dans 10 secondes.",
+        }
+    _pending_store.pop(token, None)
+    if not approved:
+        log.info("extraction denied | token=%s", token)
+        return {"status": "denied", "message": "Extraction refusée par l'utilisateur."}
+    log.info("extraction approved | token=%s", token)
+    return entry["result"]
 
 
 # Outil de référence : exposé UNIQUEMENT si des instructions sont configurées pour l'instance.
@@ -501,6 +530,7 @@ if SERVER_INSTRUCTIONS:
 
 # ── Routes hors MCP (non authentifiées WorkOS) ────────────────────────────────
 
+from starlette.background import BackgroundTask                    # [FASTMCP-API]
 from starlette.requests import Request                              # [FASTMCP-API]
 from starlette.responses import JSONResponse, Response             # [FASTMCP-API]
 
@@ -546,24 +576,24 @@ async def slack_action(request: Request) -> Response:
         return JSONResponse({"error": "malformed payload"}, status_code=400)
 
     approved = action_id == "approve"
-    _approval_results[request_id] = approved
-    event = _pending_approvals.get(request_id)
-    if event:
-        event.set()
+    entry = _pending_store.get(request_id)
+    if entry:
+        entry["approved"] = approved
     else:
         log.warning("slack action: unknown or expired request_id=%s", request_id)
 
-    # Mettre à jour le message Slack pour confirmer l'action
+    log.info("slack action | request_id=%s | approved=%s", request_id, approved)
+
+    # Répondre à Slack immédiatement (< 3s requis), puis mettre à jour le message en arrière-plan.
+    background = None
     if response_url:
         label = "Extraction approuvée." if approved else "Extraction refusée."
         icon = ":white_check_mark:" if approved else ":no_entry:"
-        _post_to_url(response_url, {
-            "text": f"{icon} {label}",
-            "replace_original": True,
-        })
-
-    log.info("slack action | request_id=%s | approved=%s", request_id, approved)
-    return JSONResponse({"ok": True})
+        background = BackgroundTask(
+            _post_to_url, response_url,
+            {"text": f"{icon} {label}", "replace_original": True},
+        )
+    return JSONResponse({"ok": True}, background=background)
 
 
 if __name__ == "__main__":
