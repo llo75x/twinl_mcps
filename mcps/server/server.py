@@ -275,19 +275,20 @@ def _post_to_url(url: str, payload: dict, timeout: int = 5) -> None:
         log.warning("slack post failed: %s (%s)", type(e).__name__, url[:60])
 
 
-def _send_slack_approval_request(request_id: str, row_count: int, byte_size: int) -> bool:
+def _send_slack_approval_request(request_id: str, row_count: int, byte_size: int, export_format: str | None = None) -> bool:
     """Envoie la demande d'approbation dans Slack. Retourne True si l'envoi a réussi."""
     if not SLACK_WEBHOOK_URL:
         return False
     size_kb = byte_size // 1024
+    fmt_label = f" → fichier *{export_format.upper()}*" if export_format else ""
     blocks = [
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    ":warning: *MCP Projea — Extraction volumineuse*\n"
-                    f"Une requête demande *{row_count} lignes* / *{size_kb} Ko*.\n"
+                    ":warning: *MCP Projea — Export fichier volumineux*\n"
+                    f"Une extraction{fmt_label} demande *{row_count} lignes* / *{size_kb} Ko*.\n"
                     f"Seuils configurés : {SLACK_NOTIFY_THRESHOLD} lignes · "
                     f"{SLACK_BYTES_THRESHOLD // 1024} Ko\n\n"
                     f"Approuves-tu cette extraction ?"
@@ -423,11 +424,11 @@ _MYSQL_QUERY_BASE_DESC = (
     "Seules les requêtes de lecture (SELECT, y compris CTE WITH/UNION, SHOW, DESCRIBE) sont "
     "autorisées. Les réponses sont plafonnées (lignes et octets) ; si « truncated » est vrai, "
     "affine la requête (agrège ou filtre) plutôt que de tout re-tirer.\n\n"
-    "⛔ INTERDIT — contournement du seuil d'extraction : ne jamais paginer (OFFSET/fragmentation "
-    "multi-appels, tranches d'ID, filtres alphabétiques, GROUP_CONCAT ou toute autre technique) "
-    "pour dépasser le seuil sans approbation. Si une requête est volumineuse, exécute-la "
-    "normalement en UN SEUL appel : le serveur envoie automatiquement une demande d'approbation "
-    "Slack et attend la réponse de l'utilisateur avant de renvoyer les données."
+    "Paramètre `export_format` (optionnel) : à renseigner OBLIGATOIREMENT quand le résultat "
+    "est destiné à produire un fichier téléchargeable (Excel, CSV, etc.). "
+    "Valeurs : `\"excel\"`, `\"csv\"`, `\"json\"` ou toute autre extension de fichier. "
+    "Laisser vide si le résultat est affiché dans le corps de la réponse (liste, tableau, etc.). "
+    "Le contrôle d'approbation Slack ne s'applique QUE lorsque `export_format` est fourni."
 )
 if TOOL_DIGEST:
     _MYSQL_QUERY_DESC = (
@@ -444,7 +445,7 @@ else:
 
 
 @mcp.tool(description=_MYSQL_QUERY_DESC)                              # [FASTMCP-API]
-def mysql_query(sql: str) -> dict:
+def mysql_query(sql: str, export_format: str | None = None) -> dict:
     """Exécute un SELECT read-only ; voir _MYSQL_QUERY_DESC pour la description exposée au modèle."""
     subject = _check_subject()
     safe_sql, anon_sql = validate_read_only(sql)
@@ -458,7 +459,7 @@ def mysql_query(sql: str) -> dict:
     log.info("query ok | sub=%s | rows=%s | bytes=%s | trunc=%s | sql=%s",
              subject, result["row_count"], result["byte_size"], result["truncated"], anon_sql)
 
-    if _slack_approval_active() and _is_large_result(result):
+    if _slack_approval_active() and export_format and _is_large_result(result):
         token = secrets.token_urlsafe(16)
         log.info("large result — slack approval pending | token=%s | rows=%s | bytes=%s",
                  token, result["row_count"], result["byte_size"])
@@ -467,7 +468,7 @@ def mysql_query(sql: str) -> dict:
             "approved": None,
             "expires_at": time.time() + PENDING_TTL_S,
         }
-        _send_slack_approval_request(token, result["row_count"], result["byte_size"])
+        _send_slack_approval_request(token, result["row_count"], result["byte_size"], export_format)
         return {
             "status": "approval_pending",
             "approval_token": token,
