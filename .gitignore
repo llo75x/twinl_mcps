@@ -20,6 +20,11 @@ mcps/*.env
 mcps/**/*.local.*
 !mcps/server/.env.example
 
+# ── DDL avec password substitué (ex. mcps/sql/projea2_setup.local.sql) ───────
+# Déjà couvert par le motif *.local.* ci-dessus ; rendu explicite car c'est le
+# fichier qui porte le mot de passe du user read-only.
+mcps/sql/*.local.sql
+
 # ── OS / éditeurs ────────────────────────────────────────────
 Thumbs.db
 .DS_Store

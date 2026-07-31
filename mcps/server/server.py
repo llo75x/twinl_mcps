@@ -287,7 +287,9 @@ def _send_slack_approval_request(request_id: str, row_count: int, byte_size: int
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    ":warning: *MCP Projea — Export fichier volumineux*\n"
+                    # SERVER_NAME, pas un nom en dur : 3 instances peuvent poster dans le
+                    # même canal Slack, il faut savoir LAQUELLE demande l'approbation.
+                    f":warning: *{SERVER_NAME} — Export fichier volumineux*\n"
                     f"Une extraction{fmt_label} demande *{row_count} lignes* / *{size_kb} Ko*.\n"
                     f"Seuils configurés : {SLACK_NOTIFY_THRESHOLD} lignes · "
                     f"{SLACK_BYTES_THRESHOLD // 1024} Ko\n\n"
@@ -316,7 +318,10 @@ def _send_slack_approval_request(request_id: str, row_count: int, byte_size: int
         },
     ]
     _post_to_url(SLACK_WEBHOOK_URL, {
-        "text": f"Extraction volumineuse — {row_count} lignes / {size_kb} Ko — approbation requise",
+        "text": (
+            f"{SERVER_NAME} — extraction volumineuse "
+            f"({row_count} lignes / {size_kb} Ko) — approbation requise"
+        ),
         "blocks": blocks,
     })
     return True

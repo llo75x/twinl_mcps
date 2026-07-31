@@ -172,10 +172,35 @@ Inconvénients :
   par défaut.
 - Moins lisible (DDL généré dynamiquement, pas visible directement dans le SQL committé).
 
+### Pattern C — Hybride : boucle + vues à colonnes projetées (`projea2`)
+
+Retenu pour **projea2** (45 vues sur 50 tables), parce que le critère de sensibilité n'y est pas la *table* mais
+la **colonne** : `users` doit être lisible (savoir qui a créé un event) sans exposer
+`password_hash` ; `email_messages` est un objet métier central mais porte un
+`unsubscribe_token` qui **est une capacité** (il permet de désinscrire un destinataire).
+
+La boucle du pattern B exclut ces tables, et une vue explicite les réexpose **sans la colonne
+sensible** — le secret n'est alors atteignable par aucun `SELECT`, même `SELECT *`, puisqu'il n'est
+pas dans la vue. Ajouts par rapport au pattern B :
+
+- une **purge des vues orphelines** (table source droppée par une migration Alembic, ou table
+  nouvellement passée en exclusion) — `CREATE OR REPLACE VIEW` ne l'aurait pas faite ;
+- des **requêtes de contrôle anti-fuite** en fin de script : aucune table exclue ne doit avoir de
+  vue, aucune colonne secrète ne doit apparaître dans `information_schema.columns`, et aucune table
+  source ne doit être sans décision (exposée **ou** explicitement exclue).
+
+Voir [`../mcps/sql/projea2_setup.sql`](../mcps/sql/projea2_setup.sql).
+
+> Limite structurelle du modèle, commune à A, B et C : **une vue ne suit pas son schéma**. Sur une
+> base sous Alembic qui migre souvent, le DDL doit être **rejoué après chaque changement de
+> table/colonne** — sinon une colonne ajoutée reste invisible et une colonne retirée casse la vue.
+
 ### Critère de choix
 
 - Base data-warehouse / analytique avec relations riches (chaînes de JOIN, filtres tenants) → **Pattern A**.
 - Base ERP / catalogue avec nombreuses tables indépendantes et exclusions par liste → **Pattern B**.
+- Base applicative moderne où le secret est **une colonne** (hash, jeton) dans une table par ailleurs
+  utile → **Pattern C**.
 
 ---
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# 2 instances du serveur MCP HTTPS read-only (iafec + projea), même image.
+# 3 instances du serveur MCP HTTPS read-only (iafec + projea + projea2), même image.
 # Déployé sur le VPS dans /opt/twinl_mcps (compte ethan/docker).
 #
 # Sécurité réseau :
@@ -42,6 +42,30 @@ services:
       - ./instructions/projea.md:/app/instructions.md:ro  # règles métier projea (MCP_INSTRUCTIONS_FILE)
     ports:
       - "127.0.0.1:8082:8080"      # public via Apache → mcp-projea.twinl.fr
+    networks: [mcpnet]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  # PROJEA2 — base `projea2` (CRM/ERP M&A, réécriture de `twinl`). Instance
+  # DISTINCTE de mcp-projea : deux bases, deux jeux de règles métier, jamais mélangés.
+  mcp-projea2:
+    build: ./server
+    container_name: mcp-projea2
+    restart: unless-stopped
+    env_file: ./projea2.env        # créé sur le VPS, chmod 600, gitignored
+    volumes:
+      - ./instructions/projea2.md:/app/instructions.md:ro # règles métier projea2 (MCP_INSTRUCTIONS_FILE)
+    ports:
+      - "127.0.0.1:8083:8080"      # public via Apache → mcp-projea2.twinl.fr
     networks: [mcpnet]
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -1,5 +1,5 @@
 # =============================================================================
-# Vhosts Apache pour les 2 serveurs MCP HTTPS (façade VPS, Apache2 mpm_prefork).
+# Vhosts Apache pour les 3 serveurs MCP HTTPS (façade VPS, Apache2 mpm_prefork).
 # À déposer dans /etc/apache2/sites-available/ puis `a2ensite`.
 #
 # Pré-requis modules (phase 5) :  a2enmod proxy proxy_http ssl headers rewrite
@@ -7,14 +7,16 @@
 # imposé par mod_php des autres applis ; le mode stateless de FastMCP évite que
 # les connexions retiennent un worker).
 #
-# TLS : soit `certbot --apache -d mcp-iafec.twinl.fr -d mcp-projea.twinl.fr`
-# (auto-injecte les directives SSL), soit `certbot certonly` + les chemins ci-dessous.
+# TLS : soit `certbot --apache -d mcp-iafec.twinl.fr -d mcp-projea.twinl.fr
+# -d mcp-projea2.twinl.fr` (auto-injecte les directives SSL), soit
+# `certbot certonly` + les chemins ci-dessous.
 # =============================================================================
 
 # ── Redirection HTTP → HTTPS (+ challenge ACME) ──────────────────────────────
 <VirtualHost *:80>
     ServerName mcp-iafec.twinl.fr
     ServerAlias mcp-projea.twinl.fr
+    ServerAlias mcp-projea2.twinl.fr
     DocumentRoot /var/www/html
     # Laisser passer le challenge Let's Encrypt
     Alias /.well-known/acme-challenge/ /var/www/html/.well-known/acme-challenge/
@@ -85,4 +87,30 @@
 
     ErrorLog  ${APACHE_LOG_DIR}/mcp-projea-error.log
     CustomLog ${APACHE_LOG_DIR}/mcp-projea-access.log combined
+</VirtualHost>
+
+# ── HTTPS — MCP projea2 ───────────────────────────────────────────────────────
+<VirtualHost *:443>
+    ServerName mcp-projea2.twinl.fr
+
+    SSLEngine on
+    SSLCertificateFile      /etc/letsencrypt/live/mcp-projea2.twinl.fr/fullchain.pem
+    SSLCertificateKeyFile   /etc/letsencrypt/live/mcp-projea2.twinl.fr/privkey.pem
+    SSLProtocol             all -SSLv3 -TLSv1 -TLSv1.1
+
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Strict-Transport-Security "max-age=31536000"
+
+    SetEnv no-gzip 1
+    RequestHeader unset Accept-Encoding
+    SetEnv proxy-sendchunked 1
+    ProxyTimeout 120
+    ProxyPreserveHost On
+
+    ProxyPass        "/" "http://127.0.0.1:8083/" flushpackets=on
+    ProxyPassReverse "/" "http://127.0.0.1:8083/"
+
+    ErrorLog  ${APACHE_LOG_DIR}/mcp-projea2-error.log
+    CustomLog ${APACHE_LOG_DIR}/mcp-projea2-access.log combined
 </VirtualHost>

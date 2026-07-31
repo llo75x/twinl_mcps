@@ -5,10 +5,15 @@ Un fichier par MCP. Son contenu est délivré au client via le **champ MCP stand
 connecte au connecteur : claude.ai web, Claude Desktop, Cowork, Claude Code. Une seule source,
 lue partout — pas de skill doc à charger en parallèle.
 
-| Fichier | Instance | Monté dans le conteneur | Variable |
-|---|---|---|---|
-| `projea.md` | `mcp-projea` | `/app/instructions.md` (ro) | `MCP_INSTRUCTIONS_FILE` |
-| `iafec.md` | `mcp-iafec` | `/app/instructions.md` (ro) | `MCP_INSTRUCTIONS_FILE` |
+| Fichier | Instance | Base exposée | Monté dans le conteneur | Variable |
+|---|---|---|---|---|
+| `projea.md` | `mcp-projea` | `twinl` (legacy Projea1) | `/app/instructions.md` (ro) | `MCP_INSTRUCTIONS_FILE` |
+| `projea2.md` | `mcp-projea2` | `projea2` (CRM de référence) | `/app/instructions.md` (ro) | `MCP_INSTRUCTIONS_FILE` |
+| `iafec.md` | `mcp-iafec` | `iafec` | `/app/instructions.md` (ro) | `MCP_INSTRUCTIONS_FILE` |
+
+> `projea.md` et `projea2.md` décrivent **la même donnée métier dans deux modèles différents**.
+> Ne jamais copier une règle de l'un vers l'autre sans la retraduire : dans `twinl` les statuts sont
+> des entiers de `tb_CodeStatut`, dans `projea2` ce sont des **codes texte** de `reference_values`.
 
 Le montage est déclaré dans [`../docker-compose.yml`](../docker-compose.yml) (`volumes:`), versionné.
 La valeur par défaut de `MCP_INSTRUCTIONS_FILE` est `/app/instructions.md` côté serveur : pas besoin
@@ -17,7 +22,14 @@ de toucher aux `.env` secrets du VPS.
 ## Règles
 
 - **Jamais de secret** ici (ces fichiers sont commités). Que du schéma + règles métier.
-- **Par instance, jamais mélangés** : projea ne voit que `projea.md`, iafec que `iafec.md`.
+- **Par instance, jamais mélangés** : projea ne voit que `projea.md`, projea2 que `projea2.md`,
+  iafec que `iafec.md`.
+- **Un bloc `<!-- DIGEST -->…<!-- /DIGEST -->`** est obligatoire : claude.ai web n'expose pas le
+  champ MCP `instructions` au modèle, et c'est ce bloc que `server.py` injecte dans la
+  **description de l'outil** `mysql_query` (canal fiable cross-client). Le reste du fichier est
+  servi par l'outil `get_data_model_reference`.
+- **Refléter ce que la base miroir expose vraiment** : si le DDL retire une colonne (secret) ou une
+  table, le dire dans le `.md` — sinon le modèle la cherchera et échouera.
 - **Fail-soft** : un fichier vide ou illisible → le serveur démarre sans instructions (aucune règle
   délivrée), il ne crashe pas.
 - **Merge des sources** : ces fichiers fusionnent la cartographie des repos data (`skill_MCP_projea.md`,
