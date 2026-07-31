@@ -107,18 +107,28 @@ logs **anonymisés** (jamais de données ni de littéraux), transport **stateles
 
 ---
 
-## Phase 3 — DNS  *(utilisateur)*
+## Phase 3 — DNS  *(utilisateur — manager **OVH**)*
 
-Dans la zone `twinl.fr` du BIND (VPS) :
+⚠️ **Corrigé le 2026-07-31.** Cette section indiquait le BIND du VPS + `rndc reload twinl.fr`.
+C'est faux : sur le VPS, `bind9`/`named` sont **inactifs** et aucune zone n'est déclarée dans
+`/etc/bind/named.conf.local`. Les NS autoritatifs de `twinl.fr` sont **`ns111.ovh.net` /
+`dns111.ovh.net`** → la zone est chez **OVH**, et c'est là qu'on ajoute les sous-domaines.
+
+Manager OVH → *Noms de domaine* → `twinl.fr` → *Zone DNS* → une entrée `A` par instance :
 
 ```
-mcp-iafec    IN  A   54.38.35.104
-mcp-projea   IN  A   54.38.35.104
-mcp-projea2  IN  A   54.38.35.104
+mcp-iafec    A   54.38.35.104
+mcp-projea   A   54.38.35.104
+mcp-projea2  A   54.38.35.104
 ```
 
-Puis incrémenter le serial de la zone et recharger (`rndc reload twinl.fr`). Vérifier :
-`dig +short mcp-iafec.twinl.fr` → `54.38.35.104`.
+Vérifier depuis le VPS (`dig` n'est pas installé sur le poste Windows) :
+
+```bash
+ssh vps "getent hosts mcp-iafec.twinl.fr"
+```
+
+À faire **avant la phase 5** : `certbot` valide en HTTP-01, le nom doit résoudre publiquement.
 
 ---
 

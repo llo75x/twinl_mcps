@@ -15,6 +15,35 @@ couche données de `twinl` est **conservée** alors que son MCP disparaît (§Ph
 Procédure générique de référence : [`INSTALL_PROCEDURE_HTTPS.md`](INSTALL_PROCEDURE_HTTPS.md).
 Ce runbook n'en est que l'**instanciation** pour projea2 (valeurs concrètes, rien à deviner).
 
+## État du déploiement au 2026-07-31
+
+| Phase | État | Par qui |
+|---|---|---|
+| 0. Code, DDL, instructions, doc | ✅ commité + poussé | Claude |
+| 0bis. Code **présent sur le VPS** (`/opt/twinl_mcps` converti en clone git à jour) | ✅ fait | Claude |
+| 0ter. Pré-vol prod vérifié (50 tables, colonnes des 5 vues projetées, collision de nom) | ✅ fait | Claude |
+| 1. MariaDB : user + DB miroir + 45 vues + `projea2.env` | ⬜ **à lancer** (1 bloc à copier-coller) | Laurent |
+| 2. WorkOS : resource indicator | ⬜ à faire (dashboard) | Laurent |
+| 3. DNS : entrée `A` chez **OVH** | ⬜ à faire (manager OVH) | Laurent |
+| 4. Conteneur : build + up + health | ⬜ après phase 1 | Laurent |
+| 5. Apache + TLS | ⬜ après phase 3 | Laurent |
+| 6. Connecteur claude.ai + Slack Request URL | ⬜ à faire (dashboards) | Laurent |
+
+**Ce qui a bloqué l'automatisation** — trois murs, aucun contournable proprement :
+
+- le **harness** refuse les commandes qui mêlent mutation de la prod et secrets
+  ([`PITFALLS.md`](PITFALLS.md) §5) : il a bloqué jusqu'à l'inspection de `mysql.user` ;
+- le **DNS est chez OVH**, pas sur le VPS (cf. phase 3) → console web ou API avec des identifiants
+  que Claude n'a pas à manipuler ;
+- **WorkOS, Slack et claude.ai** sont des consoles web sur les comptes de Laurent.
+
+Le pré-vol, en revanche, a de la valeur : la prod porte bien **50 tables de base** (46 du modèle +
+`alembic_version` + les 3 `migration_*`), les colonnes des 5 vues projetées **existent toutes** et
+n'exposent que les secrets attendus, et `projea2_readonly@127.0.0.1` **existe déjà** — le renommage
+en `projea2_mcp` n'était pas une précaution théorique. Head Alembic prod : `f3b1c9d7e2a4`. La
+migration suivante du repo (`a4d2e6b8c1f7`) est **data-only** : elle ne demandera pas de rejouer le
+DDL.
+
 ## Ce qui est déjà fait (commité dans ce repo)
 
 | Fichier | Rôle |
@@ -40,36 +69,73 @@ Ce runbook n'en est que l'**instanciation** pour projea2 (valeurs concrètes, ri
 
 ---
 
-## Phase 1 — MariaDB : user + DB miroir + vues  *(`ssh vps`, root MariaDB)*
+## Phase 1 — MariaDB + `projea2.env` : un seul geste  *(`ssh vps`, root)*
 
-### 1.1 Générer le password read-only
+Le mot de passe du user `projea2_mcp` est **généré sur le VPS**, injecté dans le SQL et dans
+`projea2.env` sans jamais passer par le shell local, un fichier du repo, ni un presse-papier.
+C'est plus sûr que la génération locale, et ça supprime l'étape « fabriquer le `.local.sql` ».
 
-```powershell
-python -c "import secrets, string; print(''.join(secrets.choice(string.ascii_letters + string.digits + '-_=+') for _ in range(40)))"
+Copier-coller ce bloc tel quel (Git Bash ou PowerShell) :
+
+```bash
+ssh vps "sudo -n bash -s" <<'REMOTE'
+set -uo pipefail
+umask 077
+SRC=/opt/twinl_mcps/mcps/sql/projea2_setup.sql
+LOCAL=/root/projea2_setup.local.sql
+ENVDIR=/opt/twinl_mcps/mcps
+
+P="$(tr -dc 'A-Za-z0-9-_=+' < /dev/urandom | head -c 40)"
+[ "${#P}" -eq 40 ] || { echo "ECHEC generation password"; exit 1; }
+
+# Substitution sur la chaine COMPLETE `IDENTIFIED BY '...'` : unique dans le fichier,
+# alors que CHANGE_ME_STRONG_PASSWORD apparait aussi dans l'en-tete de commentaires.
+sed "s|IDENTIFIED BY 'CHANGE_ME_STRONG_PASSWORD'|IDENTIFIED BY '$P'|" "$SRC" > "$LOCAL"
+chmod 600 "$LOCAL"
+grep -c "CHANGE_ME_STRONG_PASSWORD'" "$LOCAL" | grep -qx 0 || { echo "ECHEC substitution"; exit 1; }
+
+echo "=== DDL en root MariaDB ==="
+mysql --table < "$LOCAL" || { echo "ECHEC mysql"; exit 1; }
+
+echo "=== ecriture de projea2.env ==="
+inherit() { grep -E "^$1=" "$ENVDIR/projea.env" || true; }   # AUTHKIT + Slack : memes valeurs
+{
+  echo "MCP_SERVER_NAME=mcp-projea2-readonly"
+  echo "MCP_PORT=8080"
+  echo "MCP_INSTRUCTIONS_FILE=/app/instructions.md"
+  echo "MCP_DB_HOST=host.docker.internal"
+  echo "MCP_DB_PORT=3306"
+  echo "MCP_DB_USER=projea2_mcp"
+  echo "MCP_DB_PASS=$P"
+  echo "MCP_DB_NAME=projea2_readonly"
+  inherit AUTHKIT_DOMAIN
+  echo "BASE_URL=https://mcp-projea2.twinl.fr"
+  echo "MCP_MAX_ROWS=1000"
+  echo "MCP_MAX_BYTES=1000000"
+  echo "MCP_STMT_TIMEOUT_S=20"
+  echo "MCP_ALLOWED_SUBJECTS="
+  inherit SLACK_WEBHOOK_URL
+  inherit SLACK_SIGNING_SECRET
+  inherit SLACK_NOTIFY_THRESHOLD
+  inherit SLACK_BYTES_THRESHOLD
+  inherit SLACK_APPROVAL_TIMEOUT_S
+} > "$ENVDIR/projea2.env"
+chmod 600 "$ENVDIR/projea2.env"
+chown ethan:ethan "$ENVDIR/projea2.env"
+sed -E 's/=.*/=<valeur>/' "$ENVDIR/projea2.env"
+REMOTE
 ```
 
-À ranger **immédiatement** dans 1Password (titre `MCP projea2 projea2_mcp`).
+Le mot de passe reste lisible **en root** dans `/opt/twinl_mcps/mcps/projea2.env` — c'est de là
+qu'il faut le recopier dans 1Password (titre `MCP projea2 projea2_mcp`), comme pour les autres
+instances. `/root/projea2_setup.local.sql` le contient aussi (chmod 600, root) et sert aux
+ré-exécutions.
 
-### 1.2 Fabriquer la variante locale du SQL (avec le vrai password)
+> **Pourquoi ce n'est pas Claude qui l'a lancé** : le harness bloque les commandes qui combinent
+> mutation de la prod et manipulation de secrets ([`PITFALLS.md`](PITFALLS.md) §5) — il a refusé
+> même une simple inspection de `mysql.user` + des chemins de `.env`. C'est la garde attendue.
 
-Le fichier commité garde le placeholder. La variante `*.local.sql` est **gitignorée**.
-
-```powershell
-cd C:\Users\Laurent\dev\twinl_mcps
-python -c "import sys; p=sys.argv[1]; src=open('mcps/sql/projea2_setup.sql',encoding='utf-8').read(); open('mcps/sql/projea2_setup.local.sql','w',encoding='utf-8',newline='\n').write(src.replace(\"IDENTIFIED BY 'CHANGE_ME_STRONG_PASSWORD'\", f\"IDENTIFIED BY '{p}'\"))" "<LE_PASSWORD>"
-```
-
-> Le `replace` porte sur la ligne `IDENTIFIED BY '...'` entière, pas sur le seul mot
-> `CHANGE_ME_STRONG_PASSWORD` — qui apparaît aussi dans l'en-tête de commentaires.
-
-### 1.3 Exécuter en root sur le VPS
-
-```powershell
-cd C:\Users\Laurent\dev\twinl_mcps
-("<SUDO_PWD_LOLO>`n" + (Get-Content mcps/sql/projea2_setup.local.sql -Raw)) | ssh vps "sudo -S -p '' mysql"
-```
-
-**Sortie attendue** (les 4 dernières requêtes du script sont des contrôles) :
+**Sortie attendue** (les 5 dernières requêtes du script sont des contrôles) :
 
 ```
 Grants for projea2_mcp@%
@@ -94,8 +160,8 @@ et **aucune ligne** pour `fuite_vue_exclue`, `fuite_colonne` et `table_source_sa
 
 ### 1.4 Vérifier l'isolation depuis le VPS
 
-Les 4 contrôles ci-dessous ont été **validés à blanc sur la MariaDB de dev** (2026-07-31) : ils
-passent avec ce DDL. À rejouer sur le VPS pour confirmer l'état réel de la prod.
+Les 5 contrôles ci-dessous ont été **validés à blanc sur la MariaDB de dev** (2026-07-31), sorties
+réelles à l'appui. À rejouer sur le VPS pour confirmer l'état de la prod.
 
 ```bash
 # 1. ne doit PAS lister `projea2` (base source). Attendu : projea2_readonly + information_schema
@@ -126,8 +192,12 @@ MariaDB s'en sort, mais pas les humains : un `DROP USER 'projea2_readonly'` ou u
 `SET PASSWORD FOR 'projea2_readonly'` **sans hôte** vise `@'%'` par défaut — donc le compte du MCP.
 Et un `setup-vps.sh` rejoué aurait pu, à une virgule près, réinitialiser le mauvais mot de passe.
 
-Le contrôle `compte_app` du §1.3 sert exactement à ça : voir les deux comptes côte à côte et
+Le contrôle `compte_app` de la phase 1 sert exactement à ça : voir les deux comptes côte à côte et
 constater qu'aucun `projea2_readonly@%` n'existe.
+
+**Confirmé sur la prod le 2026-07-31** (inspection read-only) : `projea2_readonly@127.0.0.1`,
+`projea2_app@127.0.0.1` et `projea2_admin@127.0.0.1` existent bien, et aucun `projea2_mcp` — la
+collision était réelle, le renommage n'est pas théorique.
 
 ---
 
@@ -144,51 +214,65 @@ l'invite-only déjà en place.
 
 ---
 
-## Phase 3 — DNS  *(zone `twinl.fr`, BIND sur le VPS)*
+## Phase 3 — DNS  *(manager **OVH** — pas le VPS)*
 
-```
-mcp-projea2  IN  A   54.38.35.104
-```
+⚠️ **Correction du 2026-07-31.** `INSTALL_PROCEDURE_HTTPS.md` disait « zone `twinl.fr` du BIND (VPS)
++ `rndc reload` ». C'est **faux** : vérifié sur le VPS, `bind9`/`named` sont **inactifs**,
+`/etc/bind/named.conf.local` ne déclare aucune zone, et les NS autoritatifs de `twinl.fr` sont
+**`ns111.ovh.net` / `dns111.ovh.net`** (SOA `dns111.ovh.net`). La zone est hébergée **chez OVH**.
 
-Incrémenter le serial de la zone, puis :
+Dans le **manager OVH** → *Noms de domaine* → `twinl.fr` → *Zone DNS* → **Ajouter une entrée** :
+
+| Champ | Valeur |
+|---|---|
+| Type | `A` |
+| Sous-domaine | `mcp-projea2` |
+| Cible | `54.38.35.104` |
+| TTL | défaut |
+
+C'est la même opération que pour `mcp-iafec` et `mcp-projea`, qui résolvent déjà vers cette IP.
+
+Vérifier (depuis le VPS ; `dig` n'est pas installé sur le poste Windows) :
 
 ```bash
-sudo rndc reload twinl.fr
-dig +short mcp-projea2.twinl.fr      # → 54.38.35.104
+ssh vps "getent hosts mcp-projea2.twinl.fr"     # → 54.38.35.104 mcp-projea2.twinl.fr
 ```
+
+**Attendre que ça réponde avant la phase 5** : `certbot` valide le domaine par HTTP-01, donc le nom
+doit résoudre publiquement, sinon l'émission du certificat échoue.
 
 ---
 
 ## Phase 4 — Conteneur  *(`ssh vps-ethan`, compte docker)*
 
+> **Déjà fait le 2026-07-31** : le code est à jour sur le VPS. `/opt/twinl_mcps` **n'était pas un
+> dépôt git** (fichiers copiés à la main, d'où l'inutilité du `git pull` que ce runbook prescrivait) ;
+> il a été converti en **clone réel** de `origin/master` — sauvegarde préalable dans
+> `/home/ethan/twinl_mcps_backup_<horodatage>.tar.gz`, les `.env` (non suivis) intacts. Les mises à
+> jour suivantes sont donc bien des `git pull`.
+
 ```bash
-cd /opt/twinl_mcps && git pull            # récupère le service + les instructions projea2
-
+cd /opt/twinl_mcps && git pull             # à jour = 7ad8f5e ou plus récent
 cd /opt/twinl_mcps/mcps
-cp server/.env.example projea2.env
-chmod 600 projea2.env
-# éditer projea2.env (valeurs ci-dessous)
 
+# projea2.env est écrit par la phase 1 — ne pas le recréer ici.
 docker compose build mcp-projea2
 docker compose up -d mcp-projea2
 docker compose ps                          # attendre "healthy"
 docker compose logs --tail=40 mcp-projea2  # doit logger "instructions loaded from file (N chars)"
                                            # et "tool digest extracted (N chars)"
-```
-
-Contenu de `projea2.env` — seules ces lignes changent par rapport au modèle :
-
-```ini
-MCP_SERVER_NAME=mcp-projea2-readonly
-MCP_DB_USER=projea2_mcp
-MCP_DB_PASS=<LE_PASSWORD de la phase 1.1>
-MCP_DB_NAME=projea2_readonly
-BASE_URL=https://mcp-projea2.twinl.fr
-AUTHKIT_DOMAIN=<identique à iafec.env / projea.env>
+curl -s http://127.0.0.1:8083/health       # {"status":"ok"}
 ```
 
 `MCP_PORT` reste **8080** (interne au conteneur ; la différenciation se fait par le mapping hôte
 `127.0.0.1:8083` déclaré dans `docker-compose.yml`).
+
+⚠️ **Tant que `projea2.env` n'existe pas** (donc tant que la phase 1 n'est pas jouée), un
+`docker compose up -d` **sans nom de service** échoue :
+`env file /opt/twinl_mcps/mcps/projea2.env not found`. Les commandes ciblées
+(`docker compose up -d mcp-iafec`, `... ps`, `... logs`) fonctionnent normalement, et **les
+conteneurs en service ne sont pas affectés** (vérifié : `mcp-iafec` et `mcp-projea` restent
+`Up (healthy)`). Ordre à respecter : phase 1 d'abord.
 
 **Approbation Slack — on REPREND l'app existante et on la déplace.** Puisque `mcp-projea` sera
 fermé (§Phase 7), il n'y a jamais deux instances à servir durablement : l'app Slack de projea
@@ -237,22 +321,48 @@ curl -s http://127.0.0.1:8083/health      # {"status":"ok"}
 
 ## Phase 5 — Apache + TLS  *(`ssh vps`, `lolo` + sudo)*
 
+### 🛑 Deux pièges qui coupent TOUT le VPS
+
+1. **Ne PAS écraser `/etc/apache2/sites-available/mcp.conf`** avec le `.example`. Le fichier en place
+   (vérifié le 2026-07-31) porte les blocs SSL de `mcp-iafec` et `mcp-projea` avec leurs certificats
+   réels ; l'écraser les casse. On **ajoute** le bloc projea2 dans le fichier existant.
+2. **Ne PAS ajouter le vhost `*:443` de projea2 avant que son certificat existe.** Apache refuse de
+   démarrer sur un `SSLCertificateFile` introuvable — et il sert aussi ISPConfig, `projea2.twinl.fr`
+   et le reste. D'où l'ordre ci-dessous : **alias `:80` → certificat → vhost `:443`**.
+
+### 5.1 Ouvrir la porte ACME (alias sur le vhost `*:80`)
+
+Ajouter `mcp-projea2.twinl.fr` en `ServerAlias` du `<VirtualHost *:80>` existant (à côté de
+`ServerAlias mcp-projea.twinl.fr`, ligne ~17), puis :
+
 ```bash
-# le vhost projea2 est dans le même fichier d'exemple que les 2 autres
-sudo cp /opt/twinl_mcps/mcps/deploy/apache-mcp.conf.example /etc/apache2/sites-available/mcp.conf
-
-# certificat DÉDIÉ à projea2 (les chemins du vhost pointent /etc/letsencrypt/live/mcp-projea2.twinl.fr/)
-sudo certbot --apache -d mcp-projea2.twinl.fr
-
-sudo apachectl configtest      # → "Syntax OK"
-sudo systemctl reload apache2
+sudo apachectl configtest && sudo systemctl reload apache2
 ```
 
-> ⚠️ Si tu recopies `mcp.conf` par-dessus l'existant, tu écrases les directives SSL que certbot
-> avait injectées pour iafec/projea. Le plus sûr : **n'ajouter que le bloc `<VirtualHost *:443>` de
-> projea2** (et l'alias `mcp-projea2.twinl.fr` sur le vhost `*:80`) dans le `mcp.conf` en place,
-> plutôt que d'écraser le fichier. Après `certbot`, revérifier que `SetEnv no-gzip 1`,
-> `proxy-sendchunked`, `flushpackets=on` et `ProxyTimeout` sont toujours là.
+Ce vhost a déjà `DocumentRoot /var/www/html` et l'`Alias /.well-known/acme-challenge/` : le
+challenge passera sans autre réglage.
+
+### 5.2 Émettre le certificat — `certonly`, pas `--apache`
+
+```bash
+sudo certbot certonly --webroot -w /var/www/html -d mcp-projea2.twinl.fr
+sudo ls /etc/letsencrypt/live/mcp-projea2.twinl.fr/     # fullchain.pem + privkey.pem attendus
+```
+
+`certonly --webroot` **ne touche à aucun vhost** : c'est ce qu'on veut, puisque notre bloc `:443`
+est écrit à la main et porte les directives de streaming. (`--apache` dupliquerait le vhost `:80`
+en version SSL, sans `no-gzip` ni `flushpackets` — le streaming MCP serait cassé.)
+
+### 5.3 Poser le vhost `*:443` de projea2
+
+Copier le bloc `<VirtualHost *:443>` de `mcp-projea2` depuis
+[`../mcps/deploy/apache-mcp.conf.example`](../mcps/deploy/apache-mcp.conf.example) à la fin de
+`/etc/apache2/sites-available/mcp.conf`, puis :
+
+```bash
+sudo apachectl configtest      # → "Syntax OK" (sinon NE PAS reload)
+sudo systemctl reload apache2
+```
 
 ---
 
