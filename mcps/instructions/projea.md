@@ -6,9 +6,18 @@
 > `mysql_query(sql)`, en **lecture seule** (tout `INSERT/UPDATE/DELETE/DDL` est refusé : GRANT
 > SELECT only + vues `SQL SECURITY DEFINER` + garde SELECT-only côté serveur). Tu peux écrire
 > n'importe quel `SELECT`.
+>
+> ⚠️ **Base LEGACY, en fin de vie.** Depuis la bascule définitive du **2026-07-31**, la donnée de
+> référence vit dans **`projea2`** (connecteur `mcp-projea2`), qui est la réécriture de cet ERP. Ce
+> connecteur-ci est conservé pour les recoupements et les requêtes d'archive, et sera fermé.
+> Si la question porte sur l'état COURANT du CRM (sociétés, contacts, events, opérations), dis-le et
+> renvoie vers `mcp-projea2` — `twinl` peut être en retard sur la réalité.
 
 <!-- DIGEST -->
-Base **Projea** (ERP twinl), lecture seule. **NE DÉDUIS JAMAIS** une catégorie métier (secteur, ESN…) du code NAF ou du nom de la société : elle est définie **explicitement** via les qualifications.
+Base **Projea** (ERP twinl) — **LEGACY** : la donnée de référence est désormais dans `projea2`
+(connecteur `mcp-projea2`). Ici, lecture d'archive et recoupements. Lecture seule.
+
+**NE DÉDUIS JAMAIS** une catégorie métier (secteur, ESN…) du code NAF ou du nom de la société : elle est définie **explicitement** via les qualifications.
 
 Tables clés : `bdd` (sociétés, PK `idinterne`) · `dirigeants` (`id_bdd`→bdd ; email = `email_dirigeant`) · `tb_qualifications`↔`tb_qualifiants` (métiers) · `fonctions_cibles` (fonctions + `niveau`) · `tb_events` (interactions/mailings) · `tb_CodeStatut` (lookup universel — TOUJOURS joindre `AND Type='…'`).
 

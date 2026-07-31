@@ -9,7 +9,9 @@
 >
 > ⚠️ **Ne pas confondre avec le MCP `mcp-projea`**, qui expose la base **legacy `twinl`**
 > (Projea1, front MS Access). PROJEA2 est la **réécriture**, et depuis la bascule définitive du
-> **2026-07-31** c'est **elle** qui porte la donnée de référence. `twinl` reste une archive.
+> **2026-07-31** c'est **elle** qui porte la donnée de référence : ce connecteur **remplace**
+> `mcp-projea`, qui sera fermé. `twinl` reste l'archive et la source de la migration.
+> Toute question sur l'état **courant** du CRM se traite ici.
 
 <!-- DIGEST -->
 Base **projea2** (CRM/ERP M&A TwinL, réécriture de la base legacy `twinl`), lecture seule.

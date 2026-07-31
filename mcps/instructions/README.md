@@ -14,6 +14,11 @@ lue partout — pas de skill doc à charger en parallèle.
 > `projea.md` et `projea2.md` décrivent **la même donnée métier dans deux modèles différents**.
 > Ne jamais copier une règle de l'un vers l'autre sans la retraduire : dans `twinl` les statuts sont
 > des entiers de `tb_CodeStatut`, dans `projea2` ce sont des **codes texte** de `reference_values`.
+>
+> `mcp-projea2` **remplace** `mcp-projea` (fermeture prévue après recette, cf.
+> [`../../docs/RUNBOOK_MCP_PROJEA2.md`](../../docs/RUNBOOK_MCP_PROJEA2.md) phase 7). `projea.md`
+> sera alors **archivé, pas supprimé** : `twinl` reste l'archive et la source de la migration, et sa
+> sémantique doit rester lisible.
 
 Le montage est déclaré dans [`../docker-compose.yml`](../docker-compose.yml) (`volumes:`), versionné.
 La valeur par défaut de `MCP_INSTRUCTIONS_FILE` est `/app/instructions.md` côté serveur : pas besoin

@@ -1,7 +1,12 @@
-# Runbook — déployer le MCP `projea2` (3ᵉ instance)
+# Runbook — déployer le MCP `projea2`, puis fermer `mcp-projea`
 
 Les commandes exactes à lancer, dans l'ordre, pour exposer la base **`projea2`** (CRM/ERP M&A
-PROJEA2) à claude.ai via une 3ᵉ instance du serveur MCP HTTPS.
+PROJEA2) à claude.ai via une 3ᵉ instance du serveur MCP HTTPS — **et remplacer** `mcp-projea`
+(base legacy `twinl`), qui sera fermé une fois projea2 recetté (§Phase 7).
+
+Le remplacement, et non la coexistence durable, décide de deux choses en cours de route :
+l'**app Slack** de projea est *déménagée* vers projea2 plutôt que dupliquée (§Phase 4), et la
+couche données de `twinl` est **conservée** alors que son MCP disparaît (§Phase 7).
 
 > **Qui fait quoi** ([`PITFALLS.md`](PITFALLS.md) §5) : tout ce qui suit **modifie la prod** →
 > c'est **Laurent** qui lance ces commandes. Claude a écrit le code, la config et cette procédure ;
@@ -185,16 +190,42 @@ AUTHKIT_DOMAIN=<identique à iafec.env / projea.env>
 `MCP_PORT` reste **8080** (interne au conteneur ; la différenciation se fait par le mapping hôte
 `127.0.0.1:8083` déclaré dans `docker-compose.yml`).
 
-**Approbation Slack** (optionnelle, cf. `.env.example`) : si tu réutilises la même app Slack que
-`mcp-projea`, recopie `SLACK_WEBHOOK_URL` + `SLACK_SIGNING_SECRET` et ajoute
-`https://mcp-projea2.twinl.fr/slack/action` comme **2ᵉ Request URL**… ce que Slack **ne permet
-pas** (une seule Request URL d'interactivité par app). Deux options :
+**Approbation Slack — on REPREND l'app existante et on la déplace.** Puisque `mcp-projea` sera
+fermé (§Phase 7), il n'y a jamais deux instances à servir durablement : l'app Slack de projea
+**devient** celle de projea2. Rien à créer.
 
-- laisser les variables Slack **vides** sur projea2 → aucune approbation demandée (comportement
-  d'origine, plafonds lignes/octets toujours actifs) ;
-- créer une **app Slack dédiée** « MCP projea2 » (webhook + signing secret propres, Request URL
-  `https://mcp-projea2.twinl.fr/slack/action`). Le message Slack nomme désormais l'instance
-  (`MCP_SERVER_NAME`), donc les deux apps ne se confondent pas.
+1. Recopier **à l'identique** dans `projea2.env`, depuis `projea.env` :
+
+   ```ini
+   SLACK_WEBHOOK_URL=<identique à projea.env>       # même canal
+   SLACK_SIGNING_SECRET=<identique à projea.env>    # même app, donc même secret
+   SLACK_NOTIFY_THRESHOLD=200
+   SLACK_BYTES_THRESHOLD=50000
+   SLACK_APPROVAL_TIMEOUT_S=120
+   ```
+
+2. Côté Slack (api.slack.com/apps → l'app existante → **Interactivity & Shortcuts**), remplacer la
+   **Request URL** :
+
+   ```
+   avant :  https://mcp-projea.twinl.fr/slack/action
+   après :  https://mcp-projea2.twinl.fr/slack/action
+   ```
+
+   Slack n'accepte **qu'une seule** Request URL par app : c'est un déménagement, pas un ajout.
+
+⚠️ **Pendant la période de recouvrement** (projea2 en service, projea pas encore fermé),
+l'approbation interactive ne fonctionne que pour **l'instance visée par la Request URL**. À faire
+dans ce sens-là — projea2 d'abord — parce que c'est elle qui porte la donnée de référence. Ce que
+devient projea entre-temps : ses demandes d'approbation partent bien dans Slack, mais le clic est
+livré à projea2, qui ne connaît pas le jeton, le journalise (`unknown or expired request_id`) et
+laisse projea attendre jusqu'à `SLACK_APPROVAL_TIMEOUT_S`. **Échec silencieux, pas fuite** : sans
+approbation, `check_extraction_approval` ne rend jamais les données. Si un export legacy est
+nécessaire pendant cette fenêtre, vider les 2 variables Slack de `projea.env` et redémarrer
+`mcp-projea` : l'approbation est alors désactivée pour lui et les plafonds lignes/octets suffisent.
+
+> Le message Slack nomme désormais l'instance (`MCP_SERVER_NAME`), donc si les deux postent dans le
+> même canal pendant la transition, on voit tout de suite laquelle demande quoi.
 
 Vérification locale (avant Apache) :
 
@@ -260,6 +291,54 @@ Tests fonctionnels (depuis claude.ai) :
 - **Plafond** : `SELECT * FROM companies` → ≤ `MCP_MAX_ROWS` lignes + marqueur « truncated ».
 - **Étanchéité entre instances** : sur le connecteur projea2, une question sur `bdd`/`dirigeants`
   (tables `twinl`) doit échouer — et Claude doit renvoyer vers le connecteur `mcp-projea`.
+
+---
+
+## Phase 7 — Fermer `mcp-projea` (une fois projea2 recetté)
+
+`mcp-projea` (base legacy `twinl`) n'a plus de raison d'être une fois projea2 en service : c'est
+**la même donnée métier**, et deux connecteurs concurrents sur le même sujet invitent à mélanger
+deux modèles incompatibles. À faire **après** la recette de projea2, pas pendant.
+
+### 🛑 Ce qu'il ne faut PAS supprimer
+
+Fermer le MCP ≠ démonter la couche données. Le user `projea_readonly` et la DB miroir
+`twinl_readonly` sont **aussi** utilisés par le pipeline de migration de PROJEA2
+(`LEGACY_DATABASE_URL` de `/opt/projea2/backend/.env`, cf. `projea2/deploy/setup-vps.sh`), et la
+migration reste **rejouable** (`deploy/deploy.sh --reset-migration`).
+
+| Objet | Sort |
+|---|---|
+| Connecteur `mcp-projea` dans claude.ai | **supprimer** |
+| Conteneur `mcp-projea` + `projea.env` | **arrêter / retirer** |
+| Vhost `mcp-projea.twinl.fr` + cert + DNS | **retirer** (ou laisser, inoffensif) |
+| Resource indicator WorkOS `mcp-projea.twinl.fr/mcp` | **retirer** |
+| User MariaDB `projea_readonly` | ⛔ **GARDER** — migration PROJEA2 |
+| DB miroir `twinl_readonly` + ses vues | ⛔ **GARDER** — migration PROJEA2 |
+| Base source `twinl` | ⛔ **GARDER** — archive (décision D29 : on n'y touche pas) |
+
+### Ordre des gestes
+
+```bash
+# 1. claude.ai → Settings → Connectors → supprimer « mcp-projea »
+#    (à faire EN PREMIER : sinon le connecteur reste listé et échoue en silence)
+
+# 2. arrêter le conteneur   (ssh vps-ethan)
+cd /opt/twinl_mcps/mcps
+docker compose stop mcp-projea && docker compose rm -f mcp-projea
+
+# 3. Apache   (ssh vps, sudo) — retirer le <VirtualHost *:443> de mcp-projea
+#    et son ServerAlias sur le vhost *:80, puis :
+sudo apachectl configtest && sudo systemctl reload apache2
+```
+
+Puis, dans ce repo : retirer le service `mcp-projea` de `docker-compose.yml`, son vhost de
+`deploy/apache-mcp.conf.example`, et **archiver** `mcps/instructions/projea.md` plutôt que le
+supprimer — il documente la sémantique de `twinl`, qui reste l'archive et la source de la migration.
+
+> Si un besoin ponctuel de requête legacy réapparaît après la fermeture, tout est encore là côté
+> MariaDB : il suffit de relancer le conteneur (`docker compose up -d mcp-projea`) et de recréer le
+> connecteur. C'est précisément pour ça qu'on ne démonte pas la couche données.
 
 ---
 

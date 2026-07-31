@@ -36,10 +36,14 @@ jamais** entre bases.
 | Instance | Base miroir | Port hôte | Sous-domaine |
 |---|---|---|---|
 | `mcp-iafec` | `iafec_readonly` | `127.0.0.1:8081` | `mcp-iafec.twinl.fr` |
-| `mcp-projea` | `twinl_readonly` (legacy Projea1) | `127.0.0.1:8082` | `mcp-projea.twinl.fr` |
+| `mcp-projea` | `twinl_readonly` (legacy Projea1) — **à fermer** | `127.0.0.1:8082` | `mcp-projea.twinl.fr` |
 | `mcp-projea2` | `projea2_readonly` (CRM de référence) | `127.0.0.1:8083` | `mcp-projea2.twinl.fr` |
 
-Déploiement de l'instance projea2 : [`../docs/RUNBOOK_MCP_PROJEA2.md`](../docs/RUNBOOK_MCP_PROJEA2.md).
+`mcp-projea2` **remplace** `mcp-projea` : le service legacy est retiré de ce fichier une fois
+projea2 recetté (sa couche données MariaDB, elle, est conservée — la migration PROJEA2 en dépend).
+
+Déploiement de projea2 **et** fermeture de projea :
+[`../docs/RUNBOOK_MCP_PROJEA2.md`](../docs/RUNBOOK_MCP_PROJEA2.md).
 
 ## Sécurité — 4 couches (cf. ARCHITECTURE.md §3)
 

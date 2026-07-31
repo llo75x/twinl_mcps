@@ -21,13 +21,17 @@ coûteuse — d'où ce repo qui centralise :
 | MCP | Base source | Repo data | Règles métier (instructions) | Statut |
 |---|---|---|---|---|
 | `mcp-iafec` | `iafec` (MariaDB) | [`llo75x/iafec`](https://github.com/llo75x/iafec) | [`mcps/instructions/iafec.md`](mcps/instructions/iafec.md) | ✅ Opérationnel |
-| `mcp-projea` | `twinl` (MariaDB) — **legacy Projea1** | [`llo75x/projea`](https://github.com/llo75x/projea) | [`mcps/instructions/projea.md`](mcps/instructions/projea.md) | ✅ Opérationnel |
+| `mcp-projea` | `twinl` (MariaDB) — **legacy Projea1** | [`llo75x/projea`](https://github.com/llo75x/projea) | [`mcps/instructions/projea.md`](mcps/instructions/projea.md) | ⏳ **À fermer** quand projea2 est recetté ([phase 7](docs/RUNBOOK_MCP_PROJEA2.md#phase-7--fermer-mcp-projea-une-fois-projea2-recetté)) |
 | `mcp-projea2` | `projea2` (MariaDB) — **CRM de référence** | [`llo75x/projea2`](https://github.com/llo75x/projea2) | [`mcps/instructions/projea2.md`](mcps/instructions/projea2.md) | 🟠 Code prêt, déploiement à lancer ([runbook](docs/RUNBOOK_MCP_PROJEA2.md)) |
 
 > `twinl` et `projea2` portent **la même donnée métier** dans deux modèles différents : `projea2`
-> est la réécriture, et depuis la **bascule définitive du 2026-07-31** c'est elle qui fait
-> référence. `mcp-projea` reste exposé le temps de la recette (recoupements, requêtes legacy) —
-> les deux instances sont indépendantes et leurs règles métier ne se mélangent jamais.
+> est la réécriture, et depuis la **bascule définitive du 2026-07-31** c'est elle qui fait référence.
+> `mcp-projea2` **remplace** donc `mcp-projea`, il ne s'y ajoute pas : deux connecteurs concurrents
+> sur le même sujet inviteraient à mélanger deux modèles incompatibles (entiers `tb_CodeStatut` d'un
+> côté, codes texte `reference_values` de l'autre). Recouvrement le temps de la recette seulement.
+>
+> Fermer le MCP legacy ne démonte **pas** sa couche données : le user `projea_readonly` et la DB
+> miroir `twinl_readonly` restent nécessaires au pipeline de migration de PROJEA2, qui est rejouable.
 
 Conventions :
 - **Nom user MariaDB** : `<nom>_readonly` (ex. `iaFEC_readonly`, `projea_readonly`) — **exception `projea2` : `projea2_mcp`**, parce que l'application PROJEA2 possède déjà un compte `projea2_readonly` (cf. [runbook](docs/RUNBOOK_MCP_PROJEA2.md)). Vérifier qu'un nom est libre avant de l'appliquer.
