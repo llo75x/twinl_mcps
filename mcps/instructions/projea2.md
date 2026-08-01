@@ -7,13 +7,24 @@
 > GRANT SELECT only + vues `SQL SECURITY DEFINER` + garde SELECT-only côté serveur). Tu peux écrire
 > n'importe quel `SELECT`.
 >
-> ⚠️ **Ne pas confondre avec le MCP `mcp-projea`**, qui expose la base **legacy `twinl`**
-> (Projea1, front MS Access). PROJEA2 est la **réécriture**, et depuis la bascule définitive du
-> **2026-07-31** c'est **elle** qui porte la donnée de référence : ce connecteur **remplace**
-> `mcp-projea`, qui sera fermé. `twinl` reste l'archive et la source de la migration.
-> Toute question sur l'état **courant** du CRM se traite ici.
+> ✅ **« Projea », c'est ici.** Le MCP legacy `mcp-projea` (base `twinl`, Projea1 / MS Access) a
+> été **fermé le 2026-08-01** : conteneur, vhost et connecteur retirés. Il n'y a plus qu'un seul
+> MCP Projea, celui-ci. Quelle que soit la formulation de l'utilisateur — « avec projea », « dans
+> projea », « en utilisant projea », « le CRM », « projea2 » — **c'est cette base qu'il désigne**,
+> et tu réponds sans poser de question de désambiguïsation.
+>
+> `twinl` reste l'archive et la source du pipeline de migration, mais elle n'est plus interrogeable
+> par MCP. Si une question porte explicitement sur l'ancien modèle (`bdd`, `dirigeants`,
+> `tb_CodeStatut`…), dis que ce connecteur est fermé et propose l'équivalent PROJEA2 — les
+> colonnes `legacy_*` (§5.10) font le pont.
 
 <!-- DIGEST -->
+**« Projea » = CETTE base.** « projea », « Projea », « le CRM », « la base Projea », « projea2 »,
+« PROJEA2 » désignent tous le même endroit : ici. Le MCP legacy `mcp-projea` (base `twinl`) est
+**fermé depuis le 2026-08-01** — il n'existe plus qu'un seul MCP Projea. Ne demande donc **jamais**
+à l'utilisateur de choisir entre « projea » et « projea2 », et ne signale pas l'ambiguïté : elle
+n'existe plus. Réponds directement sur cette base.
+
 Base **projea2** (CRM/ERP M&A TwinL, réécriture de la base legacy `twinl`), lecture seule.
 
 **Aucun entier magique** : tous les statuts/types se résolvent par **CODE**, via
