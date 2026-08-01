@@ -28,7 +28,7 @@ Ce runbook n'en est que l'**instanciation** pour projea2 (valeurs concrètes, ri
 | 3. DNS : `A` chez OVH | ✅ `mcp-projea2.twinl.fr → 54.38.35.104` | Laurent |
 | 4. Conteneur | ✅ `Up (healthy)`, `127.0.0.1:8083` | Claude |
 | 5. Apache + TLS | ✅ 5 contrôles au vert, cert jusqu'au **2026-10-30** | Claude |
-| 2. WorkOS : resource indicator | ⬜ **à faire** | Laurent |
+| 2. WorkOS : resource indicator | ✅ fait (env. **Staging**) | Laurent |
 | 6. Connecteur claude.ai + Slack Request URL | ⬜ **à faire** | Laurent |
 
 Vérifié en ligne après la phase 5 :
@@ -54,6 +54,17 @@ actifs · 66 543 events · 235 opérations.
 
 Dans cet ordre : sans le resource indicator, le login OAuth du connecteur échoue sur
 `invalid_target`.
+
+**Chaîne de découverte OAuth vérifiée le 2026-08-01** — c'est le parcours exact de claude.ai :
+
+```
+/mcp sans jeton → 401 + resource_metadata=…/.well-known/oauth-protected-resource/mcp
+cette métadonnée → resource = https://mcp-projea2.twinl.fr/mcp
+                   authorization_server = royal-lagoon-55-staging.authkit.app
+métadonnée WorkOS → registration_endpoint présent ⇒ DCR actif
+```
+
+Les trois maillons tiennent. Reste le login lui-même, qui exige un navigateur.
 
 ## Ce qui est déjà fait (commité dans ce repo)
 
