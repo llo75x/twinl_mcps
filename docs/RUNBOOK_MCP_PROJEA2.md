@@ -15,56 +15,40 @@ couche données de `twinl` est **conservée** alors que son MCP disparaît (§Ph
 Procédure générique de référence : [`INSTALL_PROCEDURE_HTTPS.md`](INSTALL_PROCEDURE_HTTPS.md).
 Ce runbook n'en est que l'**instanciation** pour projea2 (valeurs concrètes, rien à deviner).
 
-## État du déploiement au 2026-08-01
+## État du déploiement — ✅ TERMINÉ le 2026-08-01
 
-**`https://mcp-projea2.twinl.fr` est en ligne.** Il ne reste que les consoles web.
+**`https://mcp-projea2.twinl.fr/mcp` est opérationnel et connecté à claude.ai.**
 
-| Phase | État | Par qui |
-|---|---|---|
-| 0. Code, DDL, instructions, doc | ✅ | Claude |
-| 0bis. Code sur le VPS (`/opt/twinl_mcps` converti en clone git) | ✅ | Claude |
-| 0ter. Pré-vol prod (50 tables, colonnes projetées, collision de nom) | ✅ | Claude |
-| 1. MariaDB : user + DB miroir + 45 vues + `projea2.env` | ✅ 6 contrôles au vert | Claude |
-| 3. DNS : `A` chez OVH | ✅ `mcp-projea2.twinl.fr → 54.38.35.104` | Laurent |
-| 4. Conteneur | ✅ `Up (healthy)`, `127.0.0.1:8083` | Claude |
-| 5. Apache + TLS | ✅ 5 contrôles au vert, cert jusqu'au **2026-10-30** | Claude |
-| 2. WorkOS : resource indicator | ✅ fait (env. **Staging**) | Laurent |
-| 6. Connecteur claude.ai + Slack Request URL | ⬜ **à faire** | Laurent |
+| Phase | État |
+|---|---|
+| 1. MariaDB : user `projea2_mcp` + DB miroir + 45 vues + `projea2.env` | ✅ 6 contrôles au vert |
+| 2. WorkOS : resource indicator (env. **Staging**) | ✅ |
+| 3. DNS : `A` chez OVH → `54.38.35.104` | ✅ |
+| 4. Conteneur `mcp-projea2` sur `127.0.0.1:8083` | ✅ `Up (healthy)` |
+| 5. Apache + TLS (cert jusqu'au **2026-10-30**) | ✅ 5 contrôles au vert |
+| 6. Connecteur claude.ai + Request URL Slack déménagée | ✅ handshake OAuth + `ListTools` OK |
 
-Vérifié en ligne après la phase 5 :
+Handshake observé côté serveur, de bout en bout :
 
 ```
-mcp-iafec    /health 200   /mcp 401      ← inchangé
-mcp-projea   /health 200   /mcp 401      ← inchangé
-mcp-projea2  /health 200   /mcp 401      ← nouveau
-projea2.twinl.fr → 200                   ← l'appli n'a pas bougé
-HTTP → HTTPS 301 · pas de compression · resource = https://mcp-projea2.twinl.fr/mcp
+POST /mcp → 401 · GET /.well-known/oauth-protected-resource/mcp → 200
+GET authkit.app/oauth2/jwks → 200 · POST /mcp → 200 · ListToolsRequest traité
 ```
 
 Vues sur données réelles : **58 915** sociétés vivantes · 94 954 personnes · 86 436 rattachements
 actifs · 66 543 events · 235 opérations.
 
-### Les 3 gestes restants, tous en console web
+### Reste à faire, plus tard
 
-| Où | Quoi |
-|---|---|
-| **WorkOS** → `Connect → Configuration → Resource Indicators` | ajouter `https://mcp-projea2.twinl.fr/mcp` — ⚠️ sur l'environnement **Staging** (`royal-lagoon-55-staging.authkit.app`), pas Production |
-| **Slack** → app existante → `Interactivity & Shortcuts → Request URL` | remplacer par `https://mcp-projea2.twinl.fr/slack/action` (déménagement, cf. phase 4) |
-| **claude.ai** → `Settings → Connectors → Add custom connector` | `https://mcp-projea2.twinl.fr/mcp` |
+- **Recetter** projea2 côté usage (questions métier réelles), puis **fermer `mcp-projea`** : phase 7.
+- Le mot de passe de `projea2_mcp` est dans `/opt/twinl_mcps/mcps/projea2.env` (root) —
+  **à recopier dans 1Password** s'il ne l'est pas encore, titre `MCP projea2 projea2_mcp`.
 
-Dans cet ordre : sans le resource indicator, le login OAuth du connecteur échoue sur
-`invalid_target`.
+### Bruit de fond attendu
 
-**Chaîne de découverte OAuth vérifiée le 2026-08-01** — c'est le parcours exact de claude.ai :
-
-```
-/mcp sans jeton → 401 + resource_metadata=…/.well-known/oauth-protected-resource/mcp
-cette métadonnée → resource = https://mcp-projea2.twinl.fr/mcp
-                   authorization_server = royal-lagoon-55-staging.authkit.app
-métadonnée WorkOS → registration_endpoint présent ⇒ DCR actif
-```
-
-Les trois maillons tiennent. Reste le login lui-même, qui exige un navigateur.
+Dès l'exposition publique du sous-domaine, des scanners cherchent des fichiers de configuration
+(`/.vultr-cli.yaml`, `/js/env.js`, `/settings.js`…). Tout répond **404** : le serveur n'expose que
+`/mcp`, `/health` et `/slack/action`. Les deux autres instances reçoivent la même chose depuis juin.
 
 ## Ce qui est déjà fait (commité dans ce repo)
 

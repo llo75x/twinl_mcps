@@ -22,7 +22,7 @@ coûteuse — d'où ce repo qui centralise :
 |---|---|---|---|---|
 | `mcp-iafec` | `iafec` (MariaDB) | [`llo75x/iafec`](https://github.com/llo75x/iafec) | [`mcps/instructions/iafec.md`](mcps/instructions/iafec.md) | ✅ Opérationnel |
 | `mcp-projea` | `twinl` (MariaDB) — **legacy Projea1** | [`llo75x/projea`](https://github.com/llo75x/projea) | [`mcps/instructions/projea.md`](mcps/instructions/projea.md) | ⏳ **À fermer** quand projea2 est recetté ([phase 7](docs/RUNBOOK_MCP_PROJEA2.md#phase-7--fermer-mcp-projea-une-fois-projea2-recetté)) |
-| `mcp-projea2` | `projea2` (MariaDB) — **CRM de référence** | [`llo75x/projea2`](https://github.com/llo75x/projea2) | [`mcps/instructions/projea2.md`](mcps/instructions/projea2.md) | 🟢 **En ligne** sur `https://mcp-projea2.twinl.fr` ; reste WorkOS + connecteur claude.ai ([état](docs/RUNBOOK_MCP_PROJEA2.md#état-du-déploiement-au-2026-08-01)) |
+| `mcp-projea2` | `projea2` (MariaDB) — **CRM de référence** | [`llo75x/projea2`](https://github.com/llo75x/projea2) | [`mcps/instructions/projea2.md`](mcps/instructions/projea2.md) | ✅ **Opérationnel** — `https://mcp-projea2.twinl.fr/mcp`, connecté depuis le 2026-08-01 |
 
 > `twinl` et `projea2` portent **la même donnée métier** dans deux modèles différents : `projea2`
 > est la réécriture, et depuis la **bascule définitive du 2026-07-31** c'est elle qui fait référence.
