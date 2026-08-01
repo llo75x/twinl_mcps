@@ -52,6 +52,22 @@ jamais** entre bases.
 `mcp-projea2`. Sa couche données MariaDB est **conservée** : le pipeline de migration de PROJEA2
 lit encore `twinl_readonly` via `projea_readonly`, et il est rejouable.
 
+> ⚠️ **Un troisième MCP existe, et il n'est PAS dans ce dépôt.**
+> `mcp-dataroom.twinl.fr` (conteneur `dataroom-mcp`, `127.0.0.1:5021`) est en ligne depuis le
+> 2026-08-01 et vit dans le dépôt **`twinl-dataroom`** — exploitation : son `OPS.md §8`.
+>
+> Il ne suit **pas** le modèle de ce dépôt, délibérément : il n'expose pas `mysql_query` sur une
+> base miroir mais des outils orientés documents, et il applique les **droits de l'utilisateur
+> connecté** (jeton WorkOS apparié à `users.email`, puis `permission_service`) au lieu d'une vue
+> unique en lecture seule. D'où son hébergement dans le dépôt de l'application, dont il importe le
+> code : réécrire ici la résolution des droits de la dataroom aurait divergé au premier changement
+> de règle. Il partage en revanche le **même projet WorkOS AuthKit** — même `AUTHKIT_DOMAIN`, même
+> annuaire d'invités : une invitation vaut pour les trois MCP.
+>
+> Son vhost Apache est dans son propre fichier `mcp-dataroom.conf`, pas dans le `mcp.conf` de ce
+> dépôt : deux dépôts qui se partagent un fichier de configuration, c'est un déploiement de l'un
+> qui casse l'autre.
+
 Déploiement de projea2 **et** fermeture de projea :
 [`../docs/RUNBOOK_MCP_PROJEA2.md`](../docs/RUNBOOK_MCP_PROJEA2.md).
 
