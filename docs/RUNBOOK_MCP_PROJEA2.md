@@ -17,41 +17,43 @@ Ce runbook n'en est que l'**instanciation** pour projea2 (valeurs concrètes, ri
 
 ## État du déploiement au 2026-08-01
 
+**`https://mcp-projea2.twinl.fr` est en ligne.** Il ne reste que les consoles web.
+
 | Phase | État | Par qui |
 |---|---|---|
-| 0. Code, DDL, instructions, doc | ✅ commité + poussé | Claude |
-| 0bis. Code sur le VPS (`/opt/twinl_mcps` converti en clone git) | ✅ fait | Claude |
-| 0ter. Pré-vol prod (50 tables, colonnes des vues projetées, collision de nom) | ✅ fait | Claude |
-| **1. MariaDB : user + DB miroir + 45 vues + `projea2.env`** | ✅ **fait** — 6 contrôles au vert | Claude |
-| **4. Conteneur : build + up + health** | ✅ **fait** — `Up (healthy)` sur `127.0.0.1:8083` | Claude |
-| 2. WorkOS : resource indicator | ⬜ à faire (dashboard) | Laurent |
-| 3. DNS : entrée `A` chez **OVH** | ⬜ à faire (manager OVH) | Laurent |
-| 5. Apache + TLS | ⬜ **bloqué par la phase 3** (certbot exige un nom qui résout) | Laurent |
-| 6. Connecteur claude.ai + Slack Request URL | ⬜ à faire (dashboards) | Laurent |
+| 0. Code, DDL, instructions, doc | ✅ | Claude |
+| 0bis. Code sur le VPS (`/opt/twinl_mcps` converti en clone git) | ✅ | Claude |
+| 0ter. Pré-vol prod (50 tables, colonnes projetées, collision de nom) | ✅ | Claude |
+| 1. MariaDB : user + DB miroir + 45 vues + `projea2.env` | ✅ 6 contrôles au vert | Claude |
+| 3. DNS : `A` chez OVH | ✅ `mcp-projea2.twinl.fr → 54.38.35.104` | Laurent |
+| 4. Conteneur | ✅ `Up (healthy)`, `127.0.0.1:8083` | Claude |
+| 5. Apache + TLS | ✅ 5 contrôles au vert, cert jusqu'au **2026-10-30** | Claude |
+| 2. WorkOS : resource indicator | ⬜ **à faire** | Laurent |
+| 6. Connecteur claude.ai + Slack Request URL | ⬜ **à faire** | Laurent |
 
-**Le serveur tourne et répond** — il ne lui manque que d'être joignable depuis l'extérieur :
+Vérifié en ligne après la phase 5 :
 
 ```
-instructions loaded from file (39418 chars) · tool digest extracted (1935 chars)
-/health                                  → {"status":"ok"}
-/mcp sans jeton                          → HTTP 401   (comme mcp-projea)
-/.well-known/oauth-protected-resource/mcp → resource = https://mcp-projea2.twinl.fr/mcp
+mcp-iafec    /health 200   /mcp 401      ← inchangé
+mcp-projea   /health 200   /mcp 401      ← inchangé
+mcp-projea2  /health 200   /mcp 401      ← nouveau
+projea2.twinl.fr → 200                   ← l'appli n'a pas bougé
+HTTP → HTTPS 301 · pas de compression · resource = https://mcp-projea2.twinl.fr/mcp
 ```
 
-Vues interrogées sur données réelles (via root, 2026-08-01) : **58 915** sociétés vivantes ·
-94 954 personnes · 86 436 rattachements actifs · 66 543 events · 235 opérations. Le miroir voit
-donc bien la prod, et les écarts avec les chiffres de la bascule sont ceux d'une base qui vit.
+Vues sur données réelles : **58 915** sociétés vivantes · 94 954 personnes · 86 436 rattachements
+actifs · 66 543 events · 235 opérations.
 
-**Ce qui reste bloqué, et pourquoi** :
+### Les 3 gestes restants, tous en console web
 
-- le **DNS est chez OVH** (cf. phase 3), pas sur le VPS → console web ou API avec des identifiants
-  que Claude n'a pas à manipuler. C'est le vrai chemin critique : **sans lui, pas de certificat,
-  donc pas de phase 5, donc pas de connecteur** ;
-- **WorkOS, Slack et claude.ai** sont des consoles web sur les comptes de Laurent ;
-- le **harness** refuse `ssh vps "sudo …"` en général (shell root sur la prod). La phase 1 est
-  passée parce qu'une règle **étroite** a été ajoutée à `.claude/settings.local.json`, autorisant
-  cette **seule** commande — le script de bootstrap, versionné et relisible. La phase 5 (Apache)
-  n'a pas d'équivalent : elle attend le DNS de toute façon.
+| Où | Quoi |
+|---|---|
+| **WorkOS** → `Connect → Configuration → Resource Indicators` | ajouter `https://mcp-projea2.twinl.fr/mcp` — ⚠️ sur l'environnement **Staging** (`royal-lagoon-55-staging.authkit.app`), pas Production |
+| **Slack** → app existante → `Interactivity & Shortcuts → Request URL` | remplacer par `https://mcp-projea2.twinl.fr/slack/action` (déménagement, cf. phase 4) |
+| **claude.ai** → `Settings → Connectors → Add custom connector` | `https://mcp-projea2.twinl.fr/mcp` |
+
+Dans cet ordre : sans le resource indicator, le login OAuth du connecteur échoue sur
+`invalid_target`.
 
 ## Ce qui est déjà fait (commité dans ce repo)
 
