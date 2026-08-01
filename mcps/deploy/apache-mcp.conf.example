@@ -90,6 +90,10 @@
 </VirtualHost>
 
 # ── HTTPS — MCP projea2 ───────────────────────────────────────────────────────
+# Les deux sentinelles encadrant ce bloc sont LUES par projea2_apache.sh, qui
+# l'extrait pour l'ajouter au mcp.conf en place. Ne pas les retirer, ne pas
+# imbriquer d'autre vhost entre elles : ce fichier reste la source unique du vhost.
+# >>> BEGIN mcp-projea2
 <VirtualHost *:443>
     ServerName mcp-projea2.twinl.fr
 
@@ -114,3 +118,4 @@
     ErrorLog  ${APACHE_LOG_DIR}/mcp-projea2-error.log
     CustomLog ${APACHE_LOG_DIR}/mcp-projea2-access.log combined
 </VirtualHost>
+# <<< END mcp-projea2

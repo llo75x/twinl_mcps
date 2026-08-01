@@ -295,52 +295,47 @@ curl -s http://127.0.0.1:8083/health      # {"status":"ok"}
 
 ---
 
-## Phase 5 — Apache + TLS  *(`ssh vps`, `lolo` + sudo)*
+## Phase 5 — Apache + TLS  *(`ssh vps`, root)*
 
-### 🛑 Deux pièges qui coupent TOUT le VPS
-
-1. **Ne PAS écraser `/etc/apache2/sites-available/mcp.conf`** avec le `.example`. Le fichier en place
-   (vérifié le 2026-07-31) porte les blocs SSL de `mcp-iafec` et `mcp-projea` avec leurs certificats
-   réels ; l'écraser les casse. On **ajoute** le bloc projea2 dans le fichier existant.
-2. **Ne PAS ajouter le vhost `*:443` de projea2 avant que son certificat existe.** Apache refuse de
-   démarrer sur un `SSLCertificateFile` introuvable — et il sert aussi ISPConfig, `projea2.twinl.fr`
-   et le reste. D'où l'ordre ci-dessous : **alias `:80` → certificat → vhost `:443`**.
-
-### 5.1 Ouvrir la porte ACME (alias sur le vhost `*:80`)
-
-Ajouter `mcp-projea2.twinl.fr` en `ServerAlias` du `<VirtualHost *:80>` existant (à côté de
-`ServerAlias mcp-projea.twinl.fr`, ligne ~17), puis :
+**Une seule commande**, comme la phase 1 :
 
 ```bash
-sudo apachectl configtest && sudo systemctl reload apache2
+ssh vps "sudo -n bash /opt/twinl_mcps/mcps/deploy/projea2_apache.sh"
 ```
 
-Ce vhost a déjà `DocumentRoot /var/www/html` et l'`Alias /.well-known/acme-challenge/` : le
-challenge passera sans autre réglage.
+Elle exécute [`../mcps/deploy/projea2_apache.sh`](../mcps/deploy/projea2_apache.sh), qui enchaîne
+les trois étapes **dans l'ordre qui ne casse rien**, puis vérifie le résultat de bout en bout.
 
-### 5.2 Émettre le certificat — `certonly`, pas `--apache`
+### 🛑 Pourquoi l'ordre compte
 
-```bash
-sudo certbot certonly --webroot -w /var/www/html -d mcp-projea2.twinl.fr
-sudo ls /etc/letsencrypt/live/mcp-projea2.twinl.fr/     # fullchain.pem + privkey.pem attendus
-```
+Apache **refuse de démarrer** sur un `SSLCertificateFile` introuvable. Poser le vhost `:443` avant
+d'avoir le certificat couperait **tout le VPS** — qui sert aussi ISPConfig, la Dataroom et
+`projea2.twinl.fr`. D'où : **alias `:80` → certificat → vhost `:443`**.
 
-`certonly --webroot` **ne touche à aucun vhost** : c'est ce qu'on veut, puisque notre bloc `:443`
-est écrit à la main et porte les directives de streaming. (`--apache` dupliquerait le vhost `:80`
-en version SSL, sans `no-gzip` ni `flushpackets` — le streaming MCP serait cassé.)
+| Étape | Ce qu'elle fait |
+|---|---|
+| A | ajoute `ServerAlias mcp-projea2.twinl.fr` au vhost `*:80` → ouvre le challenge ACME |
+| B | `certbot certonly --webroot` → émet le certificat, **sans toucher à aucun vhost** |
+| C | ajoute le vhost `*:443`, **extrait des sentinelles** de `apache-mcp.conf.example` |
+| D | vérifie : `/health` 200, `/mcp` 401, HTTP→HTTPS 301, pas de compression, `resource` annoncée |
 
-### 5.3 Poser le vhost `*:443` de projea2
+`certonly --webroot` plutôt que `--apache` : ce dernier fabriquerait son propre vhost SSL, sans
+`no-gzip` ni `flushpackets` — le streaming MCP serait cassé.
 
-Copier le bloc `<VirtualHost *:443>` de `mcp-projea2` depuis
-[`../mcps/deploy/apache-mcp.conf.example`](../mcps/deploy/apache-mcp.conf.example) à la fin de
-`/etc/apache2/sites-available/mcp.conf`, puis :
+### Les filets
 
-```bash
-sudo apachectl configtest      # → "Syntax OK" (sinon NE PAS reload)
-sudo systemctl reload apache2
-```
+- **sauvegarde horodatée** de `mcp.conf` avant chaque modification (`mcp.conf.bak-<date>-A|C`) ;
+- **`apachectl configtest` avant chaque reload** ; s'il échoue, la sauvegarde est **restaurée** et
+  le script s'arrête **sans avoir rechargé** — une config cassée n'atteint jamais Apache ;
+- **idempotent** : chaque étape se saute si elle est déjà faite. Rejouable sans risque.
+- Le vhost n'est **pas recopié en dur** dans le script : il est extrait de
+  [`apache-mcp.conf.example`](../mcps/deploy/apache-mcp.conf.example) entre ses sentinelles
+  `# >>> BEGIN mcp-projea2` / `# <<< END mcp-projea2`, qui reste la source unique.
 
----
+### Prérequis vérifiés par le script lui-même
+
+Il refuse de démarrer si le DNS ne résout pas (phase 3) ou si le conteneur ne répond pas sur 8083
+(phase 4) — inutile d'émettre un certificat pour un service absent.
 
 ## Phase 6 — claude.ai : ajouter le connecteur
 
