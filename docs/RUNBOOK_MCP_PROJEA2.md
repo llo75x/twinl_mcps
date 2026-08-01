@@ -22,7 +22,7 @@ Ce runbook n'en est que l'**instanciation** pour projea2 (valeurs concrètes, ri
 | 0. Code, DDL, instructions, doc | ✅ commité + poussé | Claude |
 | 0bis. Code **présent sur le VPS** (`/opt/twinl_mcps` converti en clone git à jour) | ✅ fait | Claude |
 | 0ter. Pré-vol prod vérifié (50 tables, colonnes des 5 vues projetées, collision de nom) | ✅ fait | Claude |
-| 1. MariaDB : user + DB miroir + 45 vues + `projea2.env` | ⬜ **à lancer** (1 bloc à copier-coller) | Laurent |
+| 1. MariaDB : user + DB miroir + 45 vues + `projea2.env` | ⬜ **à lancer** — une seule commande (phase 1) | Laurent |
 | 2. WorkOS : resource indicator | ⬜ à faire (dashboard) | Laurent |
 | 3. DNS : entrée `A` chez **OVH** | ⬜ à faire (manager OVH) | Laurent |
 | 4. Conteneur : build + up + health | ⬜ après phase 1 | Laurent |
@@ -75,56 +75,36 @@ Le mot de passe du user `projea2_mcp` est **généré sur le VPS**, injecté dan
 `projea2.env` sans jamais passer par le shell local, un fichier du repo, ni un presse-papier.
 C'est plus sûr que la génération locale, et ça supprime l'étape « fabriquer le `.local.sql` ».
 
-Copier-coller ce bloc tel quel (Git Bash ou PowerShell) :
+**Une seule commande**, depuis n'importe quel terminal du poste (PowerShell ou Git Bash) :
 
 ```bash
-ssh vps "sudo -n bash -s" <<'REMOTE'
-set -uo pipefail
-umask 077
-SRC=/opt/twinl_mcps/mcps/sql/projea2_setup.sql
-LOCAL=/root/projea2_setup.local.sql
-ENVDIR=/opt/twinl_mcps/mcps
-
-P="$(tr -dc 'A-Za-z0-9-_=+' < /dev/urandom | head -c 40)"
-[ "${#P}" -eq 40 ] || { echo "ECHEC generation password"; exit 1; }
-
-# Substitution sur la chaine COMPLETE `IDENTIFIED BY '...'` : unique dans le fichier,
-# alors que CHANGE_ME_STRONG_PASSWORD apparait aussi dans l'en-tete de commentaires.
-sed "s|IDENTIFIED BY 'CHANGE_ME_STRONG_PASSWORD'|IDENTIFIED BY '$P'|" "$SRC" > "$LOCAL"
-chmod 600 "$LOCAL"
-grep -c "CHANGE_ME_STRONG_PASSWORD'" "$LOCAL" | grep -qx 0 || { echo "ECHEC substitution"; exit 1; }
-
-echo "=== DDL en root MariaDB ==="
-mysql --table < "$LOCAL" || { echo "ECHEC mysql"; exit 1; }
-
-echo "=== ecriture de projea2.env ==="
-inherit() { grep -E "^$1=" "$ENVDIR/projea.env" || true; }   # AUTHKIT + Slack : memes valeurs
-{
-  echo "MCP_SERVER_NAME=mcp-projea2-readonly"
-  echo "MCP_PORT=8080"
-  echo "MCP_INSTRUCTIONS_FILE=/app/instructions.md"
-  echo "MCP_DB_HOST=host.docker.internal"
-  echo "MCP_DB_PORT=3306"
-  echo "MCP_DB_USER=projea2_mcp"
-  echo "MCP_DB_PASS=$P"
-  echo "MCP_DB_NAME=projea2_readonly"
-  inherit AUTHKIT_DOMAIN
-  echo "BASE_URL=https://mcp-projea2.twinl.fr"
-  echo "MCP_MAX_ROWS=1000"
-  echo "MCP_MAX_BYTES=1000000"
-  echo "MCP_STMT_TIMEOUT_S=20"
-  echo "MCP_ALLOWED_SUBJECTS="
-  inherit SLACK_WEBHOOK_URL
-  inherit SLACK_SIGNING_SECRET
-  inherit SLACK_NOTIFY_THRESHOLD
-  inherit SLACK_BYTES_THRESHOLD
-  inherit SLACK_APPROVAL_TIMEOUT_S
-} > "$ENVDIR/projea2.env"
-chmod 600 "$ENVDIR/projea2.env"
-chown ethan:ethan "$ENVDIR/projea2.env"
-sed -E 's/=.*/=<valeur>/' "$ENVDIR/projea2.env"
-REMOTE
+ssh vps "sudo -n bash /opt/twinl_mcps/mcps/sql/projea2_bootstrap.sh"
 ```
+
+Elle exécute [`../mcps/sql/projea2_bootstrap.sh`](../mcps/sql/projea2_bootstrap.sh), versionné et
+déjà présent sur le VPS, qui enchaîne : contrôles préalables → génération du mot de passe →
+injection dans le DDL → exécution en root MariaDB → **vérification interprétée** (verdict lisible,
+pas du SQL brut) → écriture de `projea2.env`. Il s'arrête net au premier contrôle rouge.
+
+Sortie attendue, en fin de course :
+
+```
+=== 4. Vérification du résultat ===============================
+  vues créées (attendu 45)                       45
+  colonnes secrètes exposées (attendu 0)         0
+  tables exclues exposées (attendu 0)            0
+  tables source sans vue (attendu 0)             0
+  collision projea2_readonly@% (attendu 0)       0
+  compte applicatif intact (attendu 1)           1
+OK — aucun secret exposé, compte applicatif intact.
+...
+✅ PHASE 1 TERMINÉE.
+```
+
+Le script est **rejouable** : en cas d'échec, corriger et relancer la même commande.
+⚠️ Chaque exécution **réinitialise** le mot de passe de `projea2_mcp` **et** réécrit `projea2.env`
+— les deux restent cohérents, mais il faut redémarrer le conteneur ensuite
+(`docker compose up -d mcp-projea2`).
 
 Le mot de passe reste lisible **en root** dans `/opt/twinl_mcps/mcps/projea2.env` — c'est de là
 qu'il faut le recopier dans 1Password (titre `MCP projea2 projea2_mcp`), comme pour les autres
@@ -135,30 +115,17 @@ ré-exécutions.
 > mutation de la prod et manipulation de secrets ([`PITFALLS.md`](PITFALLS.md) §5) — il a refusé
 > même une simple inspection de `mysql.user` + des chemins de `.env`. C'est la garde attendue.
 
-**Sortie attendue** (les 5 dernières requêtes du script sont des contrôles) :
+### Si un contrôle est au rouge
 
-```
-Grants for projea2_mcp@%
-GRANT USAGE ON *.* TO `projea2_mcp`@`%` IDENTIFIED BY PASSWORD '*...'
-GRANT SELECT ON `projea2_readonly`.* TO `projea2_mcp`@`%`
+| Ligne | Sens | Geste |
+|---|---|---|
+| `vues créées` ≠ 45 | le schéma de `projea2` a bougé | regarder `tables source sans vue` : une table neuve doit être **exposée ou exclue** dans le DDL, puis relancer |
+| `colonnes secrètes exposées` > 0 | 🛑 une vue laisse fuiter un secret | **ne pas continuer** — le DDL a été modifié à tort |
+| `tables exclues exposées` > 0 | 🛑 une table interdite a une vue | idem |
+| `collision projea2_readonly@%` > 0 | un compte homonyme du MCP existe | voir §1.5 — arbitrer avant d'aller plus loin |
+| `compte applicatif intact` = 0 | le compte des listes Expert/IA a disparu | rien à voir avec le MCP, mais à traiter côté PROJEA2 |
 
-compte_app        hote_app
-projea2_admin     127.0.0.1
-projea2_app       127.0.0.1
-projea2_mcp       %
-projea2_readonly  127.0.0.1
-
-nb_vues
-45
-```
-
-et **aucune ligne** pour `fuite_vue_exclue`, `fuite_colonne` et `table_source_sans_vue`.
-
-- `nb_vues` ≠ 45 → le schéma a bougé depuis l'écriture du script : regarder ce que renvoie
-  `table_source_sans_vue` (table nouvelle → décider de l'exposer ou de l'exclure).
-- une ligne dans `fuite_colonne` → **arrêter** : une colonne secrète est exposée.
-
-### 1.4 Vérifier l'isolation depuis le VPS
+### 1.4 Vérifier l'isolation depuis le VPS *(optionnel — le script a déjà tranché)*
 
 Les 5 contrôles ci-dessous ont été **validés à blanc sur la MariaDB de dev** (2026-07-31), sorties
 réelles à l'appui. À rejouer sur le VPS pour confirmer l'état de la prod.
