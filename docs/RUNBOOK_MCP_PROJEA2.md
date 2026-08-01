@@ -15,34 +15,43 @@ couche données de `twinl` est **conservée** alors que son MCP disparaît (§Ph
 Procédure générique de référence : [`INSTALL_PROCEDURE_HTTPS.md`](INSTALL_PROCEDURE_HTTPS.md).
 Ce runbook n'en est que l'**instanciation** pour projea2 (valeurs concrètes, rien à deviner).
 
-## État du déploiement au 2026-07-31
+## État du déploiement au 2026-08-01
 
 | Phase | État | Par qui |
 |---|---|---|
 | 0. Code, DDL, instructions, doc | ✅ commité + poussé | Claude |
-| 0bis. Code **présent sur le VPS** (`/opt/twinl_mcps` converti en clone git à jour) | ✅ fait | Claude |
-| 0ter. Pré-vol prod vérifié (50 tables, colonnes des 5 vues projetées, collision de nom) | ✅ fait | Claude |
-| 1. MariaDB : user + DB miroir + 45 vues + `projea2.env` | ⬜ **à lancer** — une seule commande (phase 1) | Laurent |
+| 0bis. Code sur le VPS (`/opt/twinl_mcps` converti en clone git) | ✅ fait | Claude |
+| 0ter. Pré-vol prod (50 tables, colonnes des vues projetées, collision de nom) | ✅ fait | Claude |
+| **1. MariaDB : user + DB miroir + 45 vues + `projea2.env`** | ✅ **fait** — 6 contrôles au vert | Claude |
+| **4. Conteneur : build + up + health** | ✅ **fait** — `Up (healthy)` sur `127.0.0.1:8083` | Claude |
 | 2. WorkOS : resource indicator | ⬜ à faire (dashboard) | Laurent |
 | 3. DNS : entrée `A` chez **OVH** | ⬜ à faire (manager OVH) | Laurent |
-| 4. Conteneur : build + up + health | ⬜ après phase 1 | Laurent |
-| 5. Apache + TLS | ⬜ après phase 3 | Laurent |
+| 5. Apache + TLS | ⬜ **bloqué par la phase 3** (certbot exige un nom qui résout) | Laurent |
 | 6. Connecteur claude.ai + Slack Request URL | ⬜ à faire (dashboards) | Laurent |
 
-**Ce qui a bloqué l'automatisation** — trois murs, aucun contournable proprement :
+**Le serveur tourne et répond** — il ne lui manque que d'être joignable depuis l'extérieur :
 
-- le **harness** refuse les commandes qui mêlent mutation de la prod et secrets
-  ([`PITFALLS.md`](PITFALLS.md) §5) : il a bloqué jusqu'à l'inspection de `mysql.user` ;
-- le **DNS est chez OVH**, pas sur le VPS (cf. phase 3) → console web ou API avec des identifiants
-  que Claude n'a pas à manipuler ;
-- **WorkOS, Slack et claude.ai** sont des consoles web sur les comptes de Laurent.
+```
+instructions loaded from file (39418 chars) · tool digest extracted (1935 chars)
+/health                                  → {"status":"ok"}
+/mcp sans jeton                          → HTTP 401   (comme mcp-projea)
+/.well-known/oauth-protected-resource/mcp → resource = https://mcp-projea2.twinl.fr/mcp
+```
 
-Le pré-vol, en revanche, a de la valeur : la prod porte bien **50 tables de base** (46 du modèle +
-`alembic_version` + les 3 `migration_*`), les colonnes des 5 vues projetées **existent toutes** et
-n'exposent que les secrets attendus, et `projea2_readonly@127.0.0.1` **existe déjà** — le renommage
-en `projea2_mcp` n'était pas une précaution théorique. Head Alembic prod : `f3b1c9d7e2a4`. La
-migration suivante du repo (`a4d2e6b8c1f7`) est **data-only** : elle ne demandera pas de rejouer le
-DDL.
+Vues interrogées sur données réelles (via root, 2026-08-01) : **58 915** sociétés vivantes ·
+94 954 personnes · 86 436 rattachements actifs · 66 543 events · 235 opérations. Le miroir voit
+donc bien la prod, et les écarts avec les chiffres de la bascule sont ceux d'une base qui vit.
+
+**Ce qui reste bloqué, et pourquoi** :
+
+- le **DNS est chez OVH** (cf. phase 3), pas sur le VPS → console web ou API avec des identifiants
+  que Claude n'a pas à manipuler. C'est le vrai chemin critique : **sans lui, pas de certificat,
+  donc pas de phase 5, donc pas de connecteur** ;
+- **WorkOS, Slack et claude.ai** sont des consoles web sur les comptes de Laurent ;
+- le **harness** refuse `ssh vps "sudo …"` en général (shell root sur la prod). La phase 1 est
+  passée parce qu'une règle **étroite** a été ajoutée à `.claude/settings.local.json`, autorisant
+  cette **seule** commande — le script de bootstrap, versionné et relisible. La phase 5 (Apache)
+  n'a pas d'équivalent : elle attend le DNS de toute façon.
 
 ## Ce qui est déjà fait (commité dans ce repo)
 

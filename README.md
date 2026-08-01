@@ -22,7 +22,7 @@ coûteuse — d'où ce repo qui centralise :
 |---|---|---|---|---|
 | `mcp-iafec` | `iafec` (MariaDB) | [`llo75x/iafec`](https://github.com/llo75x/iafec) | [`mcps/instructions/iafec.md`](mcps/instructions/iafec.md) | ✅ Opérationnel |
 | `mcp-projea` | `twinl` (MariaDB) — **legacy Projea1** | [`llo75x/projea`](https://github.com/llo75x/projea) | [`mcps/instructions/projea.md`](mcps/instructions/projea.md) | ⏳ **À fermer** quand projea2 est recetté ([phase 7](docs/RUNBOOK_MCP_PROJEA2.md#phase-7--fermer-mcp-projea-une-fois-projea2-recetté)) |
-| `mcp-projea2` | `projea2` (MariaDB) — **CRM de référence** | [`llo75x/projea2`](https://github.com/llo75x/projea2) | [`mcps/instructions/projea2.md`](mcps/instructions/projea2.md) | 🟠 Code déployé sur le VPS ; reste MariaDB + DNS OVH + WorkOS + connecteur ([état](docs/RUNBOOK_MCP_PROJEA2.md#état-du-déploiement-au-2026-07-31)) |
+| `mcp-projea2` | `projea2` (MariaDB) — **CRM de référence** | [`llo75x/projea2`](https://github.com/llo75x/projea2) | [`mcps/instructions/projea2.md`](mcps/instructions/projea2.md) | 🟠 Conteneur `Up (healthy)`, base miroir en place ; reste DNS OVH → TLS → WorkOS → connecteur ([état](docs/RUNBOOK_MCP_PROJEA2.md#état-du-déploiement-au-2026-08-01)) |
 
 > `twinl` et `projea2` portent **la même donnée métier** dans deux modèles différents : `projea2`
 > est la réécriture, et depuis la **bascule définitive du 2026-07-31** c'est elle qui fait référence.
