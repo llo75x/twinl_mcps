@@ -2,7 +2,7 @@
 
 Procédure pour exposer une base miroir MariaDB du VPS à **claude.ai (web)** via un serveur MCP
 **distant** (transport Streamable HTTP, OAuth 2.1). Complète [`INSTALL_PROCEDURE.md`](INSTALL_PROCEDURE.md)
-(qui ne couvre que le mode **stdio local**). Réutilisable pour iafec, projea, projea2 et tout futur MCP.
+(qui ne couvre que le mode **stdio local**). Réutilisable pour iafec, projea2 et tout futur MCP.
 
 > **Exemple instancié, prêt à exécuter** : [`RUNBOOK_MCP_PROJEA2.md`](RUNBOOK_MCP_PROJEA2.md) — la
 > même procédure avec les valeurs concrètes de la 3ᵉ instance (`projea2`), y compris la création de
@@ -24,8 +24,8 @@ claude.ai (web)
    │  OAuth 2.1 (DCR + PKCE S256) ──────────► WorkOS AuthKit  (invite-only ; ne voit pas les données)
    │  Streamable HTTP (Bearer JWT)
    ▼
-Apache2 (façade VPS, TLS certbot)   mcp-iafec / mcp-projea / mcp-projea2 .twinl.fr
-   │  ProxyPass 127.0.0.1:808x  (no-gzip, flushpackets, stateless)   8081/8082/8083
+Apache2 (façade VPS, TLS certbot)   mcp-iafec / mcp-projea2 .twinl.fr
+   │  ProxyPass 127.0.0.1:808x  (no-gzip, flushpackets, stateless)   8081 / 8083
    ▼
 Conteneur FastMCP  (server.py, AuthKitProvider valide le JWT, garde SELECT-only sqlglot)
    │  pymysql, SSCursor, plafond lignes/octets
@@ -43,7 +43,7 @@ L'OAuth est une **4ᵉ couche** au-dessus du modèle triple-couche read-only exi
 | Users `*_readonly` + DB miroirs déjà créés (procédure stdio) | `SHOW GRANTS FOR '<nom>_readonly'@'%'` |
 | SSH `vps` (lolo/sudo) pour Apache/certbot ; `vps-ethan` (docker) pour le déploiement conteneur | cf. [`PITFALLS.md`](PITFALLS.md) §4 |
 | Compte WorkOS (AuthKit) | dashboard accessible |
-| DNS de `twinl.fr` (BIND sur le VPS) modifiable | — |
+| Zone DNS de `twinl.fr` modifiable **chez OVH** (pas sur le VPS, cf. phase 3) | manager OVH accessible |
 | Docker + compose sur le VPS | `docker compose version` |
 
 ## Vue d'ensemble — 6 phases
@@ -51,7 +51,7 @@ L'OAuth est une **4ᵉ couche** au-dessus du modèle triple-couche read-only exi
 ```
 Phase 1  Code & config (dans ce repo)                       [Claude]
 Phase 2  WorkOS AuthKit : CIMD + invite-only Laurent         [utilisateur]
-Phase 3  DNS : 2 sous-domaines → IP du VPS                    [utilisateur]
+Phase 3  DNS : un sous-domaine par instance → IP du VPS       [utilisateur, OVH]
 Phase 4  Conteneurs : build + up sur le VPS                   [utilisateur, ethan/docker]
 Phase 5  Apache : vhosts + TLS certbot + reload               [utilisateur, lolo/sudo]
 Phase 6  claude.ai : ajouter les connecteurs + tester         [utilisateur]
@@ -72,7 +72,7 @@ Fichiers créés dans `mcps/` :
 | `server/server.py` | Serveur FastMCP générique (1 instance = 1 base, paramétré par env) |
 | `server/requirements.txt` | `fastmcp`, `pymysql`, `sqlglot` |
 | `server/Dockerfile` | Image `python:3.12-slim`, user non-root |
-| `server/.env.example` | Modèle d'env (à copier en `iafec.env` / `projea.env` **sur le VPS**) |
+| `server/.env.example` | Modèle d'env (à copier en `iafec.env` / `projea2.env` **sur le VPS**) |
 | `docker-compose.yml` | 2 services, bind `127.0.0.1`, réseau dédié, healthcheck, rotation logs |
 | `deploy/apache-mcp.conf.example` | Vhosts Apache (streaming, no-gzip, proxy) |
 
@@ -90,8 +90,9 @@ logs **anonymisés** (jamais de données ni de littéraux), transport **stateles
      authentifier le connecteur MCP **que** via DCR. Coche aussi CIMD (les deux peuvent cohabiter,
      CIMD restera inutilisé jusqu'à ce que claude.ai le supporte). Chaque connexion claude.ai crée
      une application dans Connect → Applications — c'est attendu, ne pas s'en débarrasser.
-   - **MCP resource indicators** : ajouter les URLs **avec `/mcp` final** (`https://mcp-iafec.twinl.fr/mcp`,
-     `https://mcp-projea.twinl.fr/mcp`, `https://mcp-projea2.twinl.fr/mcp`) — **une par instance**,
+   - **Resource Indicators** (`Connect → Configuration → Resource Indicators`) : ajouter les URLs
+     **avec `/mcp` final** (`https://mcp-iafec.twinl.fr/mcp`, `https://mcp-projea2.twinl.fr/mcp`)
+     — **une par instance**, sur le **bon environnement** (Staging/Production : la config diffère),
      à compléter à chaque nouveau MCP. C'est l'URL qu'annonce le serveur dans
      `/.well-known/oauth-protected-resource/mcp` (`resource`) → si elle ne matche pas exactement,
      WorkOS renvoie `error=invalid_target` côté claude.ai. Ajouter aussi la version sans `/mcp` est
@@ -118,7 +119,6 @@ Manager OVH → *Noms de domaine* → `twinl.fr` → *Zone DNS* → une entrée 
 
 ```
 mcp-iafec    A   54.38.35.104
-mcp-projea   A   54.38.35.104
 mcp-projea2  A   54.38.35.104
 ```
 
@@ -140,12 +140,11 @@ sudo mkdir -p /opt/twinl_mcps && sudo chown ethan:ethan /opt/twinl_mcps
 git clone git@github.com:llo75x/twinl_mcps.git /opt/twinl_mcps   # ou git pull si déjà cloné
 cd /opt/twinl_mcps/mcps
 
-# Créer les 3 fichiers d'env (JAMAIS commités), à partir du modèle
+# Créer un fichier d'env par instance (JAMAIS commités), à partir du modèle
 cp server/.env.example iafec.env
-cp server/.env.example projea.env
 cp server/.env.example projea2.env
 # → éditer chacun : MCP_SERVER_NAME, MCP_DB_USER/PASS/NAME, AUTHKIT_DOMAIN, BASE_URL (cf. ci-dessous)
-chmod 600 iafec.env projea.env projea2.env
+chmod 600 iafec.env projea2.env
 
 # Build + démarrage
 docker compose build
@@ -156,18 +155,19 @@ docker compose logs --tail=30 mcp-iafec   # noter l'URL de ressource loggée (�
 
 Valeurs distinctes par fichier :
 
-| Variable | `iafec.env` | `projea.env` | `projea2.env` |
-|---|---|---|---|
-| `MCP_SERVER_NAME` | `mcp-iafec-readonly` | *(instance fermée)* | **`projea`** — nom annoncé au client, choisi pour coïncider avec le mot que l'utilisateur emploie |
-| `MCP_DB_USER` | `iaFEC_readonly` | `projea_readonly` | `projea2_mcp` ⚠️ |
-| `MCP_DB_NAME` | `iafec_readonly` | `twinl_readonly` | `projea2_readonly` |
-| `MCP_DB_PASS` | (1Password / `*.local.sql`) | (1Password / `*.local.sql`) | (1Password / `*.local.sql`) |
-| `BASE_URL` | `https://mcp-iafec.twinl.fr` | `https://mcp-projea.twinl.fr` | `https://mcp-projea2.twinl.fr` |
-| `MCP_PORT` | `8080` (interne, ne pas changer) | idem | idem |
-| `AUTHKIT_DOMAIN` | identique aux trois | identique aux trois | identique aux trois |
+| Variable | `iafec.env` | `projea2.env` |
+|---|---|---|
+| `MCP_SERVER_NAME` | `mcp-iafec-readonly` | **`projea`** — nom annoncé au client, choisi pour coïncider avec le mot que l'utilisateur emploie |
+| `MCP_DB_USER` | `iaFEC_readonly` | `projea2_mcp` ⚠️ (pas `projea2_readonly`, déjà pris par l'appli) |
+| `MCP_DB_NAME` | `iafec_readonly` | `projea2_readonly` |
+| `MCP_DB_PASS` | (1Password) | (généré sur le VPS, cf. runbook phase 1) |
+| `BASE_URL` | `https://mcp-iafec.twinl.fr` | `https://mcp-projea2.twinl.fr` |
+| `MCP_PORT` | `8080` (interne, ne pas changer) | idem |
+| `AUTHKIT_DOMAIN` | identique aux deux | identique aux deux |
 
-> `MCP_PORT` reste **8080 dans les trois conteneurs** ; la différenciation se fait par le port publié
-> côté hôte dans `docker-compose.yml` (`127.0.0.1:8081` iafec, `8082` projea, `8083` projea2).
+> `MCP_PORT` reste **8080 dans tous les conteneurs** ; la différenciation se fait par le port publié
+> côté hôte dans `docker-compose.yml` (`127.0.0.1:8081` iafec, `8083` projea2 — `8082` est libre
+> depuis la fermeture de `mcp-projea`).
 
 > Pour n'agir que sur une instance : `docker compose build mcp-projea2` puis
 > `docker compose up -d mcp-projea2` (les autres conteneurs ne sont pas redémarrés).
@@ -190,9 +190,8 @@ sudo a2ensite mcp.conf
 # Certificats (auto-injection SSL) — le port 80 doit déjà router vers Apache.
 # UN CERTIFICAT PAR DOMAINE : les vhosts de l'exemple pointent
 # /etc/letsencrypt/live/<domaine>/ , donc ne pas regrouper les -d dans un seul appel.
-sudo certbot --apache -d mcp-iafec.twinl.fr
-sudo certbot --apache -d mcp-projea.twinl.fr
-sudo certbot --apache -d mcp-projea2.twinl.fr
+sudo certbot certonly --webroot -w /var/www/html -d mcp-iafec.twinl.fr
+sudo certbot certonly --webroot -w /var/www/html -d mcp-projea2.twinl.fr
 
 # Vérifier puis recharger
 sudo apachectl configtest        # → "Syntax OK"
@@ -213,7 +212,7 @@ sudo systemctl reload apache2
 
 1. claude.ai → **Settings → Connectors → Add custom connector**.
 2. URL : `https://mcp-iafec.twinl.fr/mcp` → dérouler le flux OAuth (login WorkOS avec l'email de Laurent).
-3. Répéter avec `https://mcp-projea.twinl.fr/mcp` et `https://mcp-projea2.twinl.fr/mcp`.
+3. Répéter avec `https://mcp-projea2.twinl.fr/mcp`.
 4. Tester : *« Via le connecteur iafec, combien de groupes et d'écritures comptables ? »* → Claude appelle
    `mysql_query(...)` (≈ 7 groupes / 611k écritures attendus).
 5. **Vérifier l'étanchéité entre instances** : sur le connecteur `projea2`, une question portant sur
@@ -267,7 +266,7 @@ Tests fonctionnels (via claude.ai ou un client FastMCP avec OAuth) :
    crée une entrée dans Connect → Applications. CIMD reste activé en parallèle (zéro coût) pour quand
    claude.ai le supportera. **Si un connecteur a été essayé avant l'activation de DCR**, claude.ai
    garde un état corrompu — **supprimer puis recréer le connecteur** dans claude.ai pour repartir propre.
-4. **Secrets** : `iafec.env` / `projea.env` créés **sur le VPS uniquement**, `chmod 600`, gitignored.
+4. **Secrets** : les `*.env` créés **sur le VPS uniquement**, `chmod 600`, gitignored.
    Ne jamais committer les passwords (règle `iafec/OPS.md` §3.5).
 5. **MariaDB sur l'hôte** : le conteneur l'atteint via `host.docker.internal:host-gateway`, **pas** en
    host-networking. (Rappel TODO sécu `iafec/OPS.md` §2.4 : MariaDB est encore bind `0.0.0.0:3306`.)
