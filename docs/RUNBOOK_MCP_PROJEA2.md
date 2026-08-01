@@ -27,6 +27,7 @@ Ce runbook n'en est que l'**instanciation** pour projea2 (valeurs concrètes, ri
 | 4. Conteneur `mcp-projea2` sur `127.0.0.1:8083` | ✅ `Up (healthy)` |
 | 5. Apache + TLS (cert jusqu'au **2026-10-30**) | ✅ 5 contrôles au vert |
 | 6. Connecteur claude.ai + Request URL Slack déménagée | ✅ handshake OAuth + `ListTools` OK |
+| 7. Fermeture de `mcp-projea` | ✅ **fait le 2026-08-01** — conteneur, vhost et certificat retirés |
 
 Handshake observé côté serveur, de bout en bout :
 
@@ -38,9 +39,26 @@ GET authkit.app/oauth2/jwks → 200 · POST /mcp → 200 · ListToolsRequest tra
 Vues sur données réelles : **58 915** sociétés vivantes · 94 954 personnes · 86 436 rattachements
 actifs · 66 543 events · 235 opérations.
 
-### Reste à faire, plus tard
+### Fermeture de `mcp-projea` — faite
 
-- **Recetter** projea2 côté usage (questions métier réelles), puis **fermer `mcp-projea`** : phase 7.
+Recette validée par Laurent, puis phase 7 exécutée. Contrôles au moment de la fermeture :
+
+```
+mcp-projea2 /health 200 ✅   mcp-iafec /health 200 ✅   projea2.twinl.fr 200 ✅
+user projea_readonly conservé ✅   vues twinl_readonly conservées : 70 ✅
+```
+
+Ce qui a été retiré : conteneur, vhost `:443`, `ServerAlias` `:80`, certificat Let's Encrypt
+(sinon `certbot renew` échouerait chaque mois sur un domaine plus servi). Retirés aussi du repo :
+le service `mcp-projea` de `docker-compose.yml`, son vhost du fichier d'exemple, et
+`instructions/projea.md` déplacé en `instructions/archive/projea.md`.
+
+Ce qui a été **conservé volontairement** : `projea_readonly`, `twinl_readonly` et sa base source
+`twinl`. Rouvrir le MCP = reprendre le service et le vhost dans l'historique git, réémettre un
+certificat ; la couche données n'a pas bougé.
+
+### Reste à faire
+
 - Le mot de passe de `projea2_mcp` est dans `/opt/twinl_mcps/mcps/projea2.env` (root) —
   **à recopier dans 1Password** s'il ne l'est pas encore, titre `MCP projea2 projea2_mcp`.
 

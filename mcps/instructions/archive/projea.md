@@ -1,3 +1,20 @@
+> # 📦 ARCHIVE — ce MCP est FERMÉ depuis le 2026-08-01
+>
+> `mcp-projea` a été **remplacé par `mcp-projea2`** (base `projea2`), qui porte la donnée de
+> référence depuis la bascule définitive du 2026-07-31. Le conteneur, le vhost Apache et le
+> certificat ont été retirés ; le connecteur claude.ai a été supprimé.
+>
+> **Ce fichier n'est plus délivré à aucun client.** Il est conservé parce que la base `twinl`
+> existe toujours — c'est l'archive et la **source du pipeline de migration de PROJEA2**, qui
+> reste rejouable. Sa sémantique (les codes `tb_CodeStatut`, les 70 vues de `twinl_readonly`)
+> doit donc rester lisible pour qui debuggue une remigration.
+>
+> ⚠️ **Ne pas s'en servir pour écrire du SQL PROJEA2** : les deux modèles sont incompatibles
+> (entiers magiques ici, codes texte `reference_values` là-bas). Voir `../projea2.md`.
+>
+> Pour rouvrir le MCP ponctuellement : reprendre le service `mcp-projea` et son vhost dans
+> l'historique git, la couche données MariaDB étant intacte.
+
 # Projea / twinl — instructions du MCP (cartographie + règles métier)
 
 > Ces instructions sont délivrées **automatiquement** par le serveur MCP `mcp-projea` (champ MCP
