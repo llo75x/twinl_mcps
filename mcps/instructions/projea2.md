@@ -52,6 +52,11 @@ Filtres impératifs :
 `events` = **interactions humaines** (timeline métier). `mail_deliveries` = **délivrabilité**
 emailing (SENT/OPENED/CLICKED/…). Ne cherche pas les ouvertures/bounces dans `events`.
 
+`operation_target_contacts.dataroom_access` est **informatif**, pas un droit : il garde la trace
+qu'un contact a eu accès à la dataroom, et n'est **pas** remis à zéro à la clôture du rattachement
+— c'est voulu. Ne le signale jamais comme une anomalie ou un droit résiduel. Les vrais droits
+documentaires vivent dans l'application Dataroom, dont le référent est le MCP `dataroom`.
+
 Les colonnes `legacy_*` (`legacy_idinterne`, `legacy_id_dirigeant`, `legacy_id_event`…) font le
 pont avec la base `twinl` du MCP `mcp-projea`.
 
@@ -342,6 +347,16 @@ Un seul modèle unifié (dans `twinl` il y avait deux systèmes parallèles non 
 - `operation_target_contacts` : les interlocuteurs d'une cible. `company_contact_id` (le
   rattachement !), `role` `PRINCIPAL`/`SECONDARY`, `is_active`, `language_id`, `email_used`,
   `dataroom_access`.
+  ⚠️ **`dataroom_access` est un indicateur PUREMENT INFORMATIF — il n'attribue AUCUN droit.**
+  Il dit « ce contact a eu accès à la dataroom », d'un coup d'œil et même des années après,
+  sans avoir à fouiller `events`. Il n'est **pas** remis à zéro quand le rattachement se clôt,
+  et c'est **assumé** : ce serait perdre l'information. Héritage de Projea1, où l'accès
+  dataroom durait quelques jours et expirait tout seul — il n'y a jamais eu de résiliation
+  utilisateur par utilisateur à faire.
+  Ne conclus donc JAMAIS qu'un `dataroom_access = 1` sur un rattachement clos est une anomalie,
+  un droit résiduel ou une faille : c'est le fonctionnement voulu. Les **vrais** droits d'accès
+  aux documents vivent dans l'application Dataroom (`dataroom.twinl.fr`), pas ici — et c'est le
+  MCP `dataroom` qui en est le référent, pas celui-ci.
 - `operation_members` : qui a accès à l'opération (accès **binaire**, pas permission par
   permission).
 - `reporting_stage` (référentiel) : regroupement des 19 statuts process en **9 stades de funnel**
