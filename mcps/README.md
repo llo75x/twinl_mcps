@@ -35,10 +35,18 @@ plafonds…). Deux instances Docker, un sous-domaine et un connecteur claude.ai 
 le modèle « un MCP par base » — et c'est ce qui garantit que les **règles métier ne se mélangent
 jamais** entre bases.
 
-| Instance | Base miroir | Port hôte | Sous-domaine |
-|---|---|---|---|
-| `mcp-iafec` | `iafec_readonly` | `127.0.0.1:8081` | `mcp-iafec.twinl.fr` |
-| `mcp-projea2` | `projea2_readonly` (CRM de référence) | `127.0.0.1:8083` | `mcp-projea2.twinl.fr` |
+| Instance | Nom annoncé | Base miroir | Port hôte | Sous-domaine |
+|---|---|---|---|---|
+| `mcp-iafec` | `mcp-iafec-readonly` | `iafec_readonly` | `127.0.0.1:8081` | `mcp-iafec.twinl.fr` |
+| `mcp-projea2` | **`projea`** | `projea2_readonly` (CRM de référence) | `127.0.0.1:8083` | `mcp-projea2.twinl.fr` |
+
+> **Pourquoi l'instance `mcp-projea2` s'annonce `projea`** (`MCP_SERVER_NAME=projea`, 2026-08-01) —
+> ce n'est pas une incohérence à corriger. Le MCP legacy étant fermé, « Projea » n'a plus qu'un
+> référent : cette base. Le nom annoncé est ce que le client affiche et ce à quoi l'utilisateur
+> s'adresse (« avec projea… ») ; le faire coïncider avec le mot employé évite une question de
+> désambiguïsation à chaque requête. Conteneur, base et sous-domaine gardent le `2`, qui dit la
+> génération du modèle de données. Le nom apparaît aussi dans les logs et les messages Slack
+> d'approbation.
 
 `mcp-projea` (`twinl_readonly`, port 8082) a été **fermé le 2026-08-01**, remplacé par
 `mcp-projea2`. Sa couche données MariaDB est **conservée** : le pipeline de migration de PROJEA2

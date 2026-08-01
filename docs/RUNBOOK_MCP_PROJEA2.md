@@ -57,6 +57,27 @@ Ce qui a été **conservé volontairement** : `projea_readonly`, `twinl_readonly
 `twinl`. Rouvrir le MCP = reprendre le service et le vhost dans l'historique git, réémettre un
 certificat ; la couche données n'a pas bougé.
 
+### « projea » route vers projea2 (2026-08-01)
+
+Une fois le legacy fermé, « Projea » n'a plus qu'un référent. Deux réglages pour que
+« avec projea… », « dans projea », « en utilisant projea » atteignent cette base **sans question
+de désambiguïsation** :
+
+1. **Le digest** (donc la description de l'outil `mysql_query`, lue à chaque appel par tous les
+   clients) énonce l'équivalence et **interdit explicitement** de demander à l'utilisateur de
+   choisir. Formulé en interdiction, pas en équivalence : un modèle prudent signalerait sinon
+   l'ambiguïté au lieu de répondre.
+2. **`MCP_SERVER_NAME=projea`** dans `projea2.env` — le nom que le serveur annonce, donc ce que le
+   client affiche. Conteneur, base et sous-domaine gardent le `2`.
+
+⚠️ Prérequis : **le connecteur `mcp-projea` doit être supprimé de claude.ai**. Tant que deux
+connecteurs répondent au mot « projea », aucune instruction côté serveur ne peut lever
+l'ambiguïté — elle est dans le client.
+
+Après tout changement d'instructions : `docker compose up -d mcp-projea2` **puis reconnecter le
+connecteur** côté claude.ai (le champ `instructions` et la description d'outil sont lus à la
+connexion).
+
 ### Reste à faire
 
 - Le mot de passe de `projea2_mcp` est dans `/opt/twinl_mcps/mcps/projea2.env` (root) —

@@ -158,7 +158,7 @@ Valeurs distinctes par fichier :
 
 | Variable | `iafec.env` | `projea.env` | `projea2.env` |
 |---|---|---|---|
-| `MCP_SERVER_NAME` | `mcp-iafec-readonly` | `mcp-projea-readonly` | `mcp-projea2-readonly` |
+| `MCP_SERVER_NAME` | `mcp-iafec-readonly` | *(instance fermée)* | **`projea`** — nom annoncé au client, choisi pour coïncider avec le mot que l'utilisateur emploie |
 | `MCP_DB_USER` | `iaFEC_readonly` | `projea_readonly` | `projea2_mcp` ⚠️ |
 | `MCP_DB_NAME` | `iafec_readonly` | `twinl_readonly` | `projea2_readonly` |
 | `MCP_DB_PASS` | (1Password / `*.local.sql`) | (1Password / `*.local.sql`) | (1Password / `*.local.sql`) |
