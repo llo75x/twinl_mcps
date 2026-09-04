@@ -138,7 +138,7 @@ Sortie attendue, en fin de course :
   vues créées (attendu 45)                       45
   colonnes secrètes exposées (attendu 0)         0
   tables exclues exposées (attendu 0)            0
-  colonnes source hors vue §3a (attendu 0)       0
+  colonnes source hors vue (attendu 0)           0
   tables source sans vue (attendu 0)             0
   collision projea2_readonly@% (attendu 0)       0
   compte applicatif intact (attendu 1)           1
@@ -168,7 +168,40 @@ ré-exécutions.
 | `vues créées` ≠ 45 | le schéma de `projea2` a bougé | regarder `tables source sans vue` : une table neuve doit être **exposée ou exclue** dans le DDL, puis relancer |
 | `colonnes secrètes exposées` > 0 | 🛑 une vue laisse fuiter un secret | **ne pas continuer** — le DDL a été modifié à tort |
 | `tables exclues exposées` > 0 | 🛑 une table interdite a une vue | idem |
-| `colonnes source hors vue §3a` > 0 | une des 5 vues à colonnes écrites à la main est en retard sur sa table (un `ADD COLUMN` ne les traverse pas) | compléter la vue en §3a du DDL, puis `CREATE OR REPLACE VIEW` — pas besoin de rejouer tout le bootstrap |
+| `colonnes source hors vue` > 0 | une vue est en retard sur sa table (un `ADD COLUMN` ne traverse ni §3a, écrite à la main, ni §3b, dont le `SELECT *` est figé au `CREATE VIEW`) | compléter la vue en §3a du DDL puis `CREATE OR REPLACE VIEW` — pas besoin de rejouer tout le bootstrap |
+
+#### Vérifier la dérive de colonnes ENTRE deux bootstraps
+
+Le verdict ci-dessus s'exécute juste après la création des vues : il ne peut donc
+pas voir une vue §3b (`SELECT *`) en retard, puisqu'elle vient d'être refaite. Or
+c'est précisément là que la dérive s'installe — MariaDB fige l'étoile au
+`CREATE VIEW`, une colonne ajoutée par une migration PROJEA2 n'entre donc dans le
+miroir qu'au bootstrap suivant. Le 2026-09-04, quatre vues §3b étaient en retard
+(`email_templates`, `export_templates`, `segments`, `segment_items`).
+
+À rejouer **seul**, sans rien modifier, après tout déploiement PROJEA2 portant une
+migration :
+
+```bash
+ssh vps 'sudo mysql --table -e "
+SELECT c.table_name, c.column_name AS colonne_absente_de_la_vue
+  FROM information_schema.columns c
+ WHERE c.table_schema=\"projea2\"
+   AND EXISTS (SELECT 1 FROM information_schema.tables v
+                WHERE v.table_schema=\"projea2_readonly\" AND v.table_type=\"VIEW\"
+                  AND v.table_name=c.table_name)
+   AND NOT ((c.table_name=\"users\" AND c.column_name=\"password_hash\")
+         OR (c.table_name=\"email_messages\" AND c.column_name=\"unsubscribe_token\")
+         OR (c.table_name=\"tracking_links\" AND c.column_name=\"token\")
+         OR (c.table_name=\"export_approvals\" AND c.column_name=\"token\")
+         OR (c.table_name=\"tracking_hits\" AND c.column_name=\"ip\"))
+   AND NOT EXISTS (SELECT 1 FROM information_schema.columns v
+                    WHERE v.table_schema=\"projea2_readonly\"
+                      AND v.table_name=c.table_name AND v.column_name=c.column_name);"'
+```
+
+0 ligne = miroir à jour. Sinon, pour une vue §3b il suffit de la refaire :
+`CREATE OR REPLACE VIEW projea2_readonly.<table> AS SELECT * FROM projea2.<table>;`
 | `collision projea2_readonly@%` > 0 | un compte homonyme du MCP existe | voir §1.5 — arbitrer avant d'aller plus loin |
 | `compte applicatif intact` = 0 | le compte des listes Expert/IA a disparu | rien à voir avec le MCP, mais à traiter côté PROJEA2 |
 

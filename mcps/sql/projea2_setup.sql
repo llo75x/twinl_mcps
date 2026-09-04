@@ -231,19 +231,37 @@ SELECT table_name, column_name AS fuite_colonne
   OR (table_name = 'tracking_hits'    AND column_name = 'ip')
    );
 
--- Doit renvoyer 0 ligne : une colonne de la table source absente de sa vue
--- PROJETÉE (§3a), alors qu'elle n'est pas dans la liste des secrets masqués.
--- Les vues de §3a listent leurs colonnes à la main : un `ALTER TABLE ... ADD
--- COLUMN` côté PROJEA2 ne les traverse donc PAS, et la colonne disparaît du
--- miroir en silence. C'est arrivé : `email_messages` a perdu 8 colonnes sur les
--- lots 1.4.0 et 1.5.0 — dont `campaign_id`, ce qui rendait le MCP aveugle sur
--- « qui a reçu telle campagne ». Les vues de §3b (`SELECT *`) n'ont pas ce
--- défaut ; ce contrôle ne vise donc que les 5 vues écrites à la main.
+-- Doit renvoyer 0 ligne : une colonne de la table source absente de sa vue,
+-- alors qu'elle n'est pas dans la liste des secrets masqués.
+--
+-- ⚠️ Le défaut vise les DEUX familles de vues, pas seulement §3a :
+--   * §3a liste ses colonnes à la main pour omettre un secret — un
+--     `ALTER TABLE ... ADD COLUMN` ne la traverse jamais, même en rejouant ce
+--     DDL. Elle reste en retard TANT QU'ON NE L'ÉDITE PAS ;
+--   * §3b est en `SELECT *`, mais MariaDB **développe l'étoile au CREATE VIEW**
+--     et fige la liste. La vue ne suit donc PAS non plus les colonnes ajoutées
+--     ensuite — elle n'est rattrapée qu'au prochain passage de la boucle.
+-- Dans les deux cas la colonne disparaît du miroir en silence, sans erreur.
+--
+-- Constaté le 2026-09-04 : `email_messages` (§3a) avait perdu 8 colonnes sur
+-- les lots 1.4.0 et 1.5.0 — dont `campaign_id`, ce qui rendait le MCP aveugle
+-- sur « qui a reçu telle campagne » ; `users` (§3a) 3 ; et QUATRE vues §3b
+-- (`email_templates`, `export_templates`, `segments`, `segment_items`) une à
+-- deux chacune, faute de bootstrap rejoué depuis.
+--
+-- Exécuté ICI, juste après la boucle, ce contrôle ne peut plus voir la dérive
+-- §3b (elle vient d'être réparée) : il garde §3a honnête. Pour vérifier un
+-- miroir ENTRE deux bootstraps — le cas où §3b dérive — rejouer cette même
+-- requête seule (voir RUNBOOK §1.3).
 SELECT c.table_name, c.column_name AS colonne_absente_de_la_vue
   FROM information_schema.columns c
  WHERE c.table_schema = 'projea2'
-   AND c.table_name IN ('users', 'email_messages', 'tracking_links',
-                        'export_approvals', 'tracking_hits')
+   AND EXISTS (
+     SELECT 1 FROM information_schema.tables v
+      WHERE v.table_schema = 'projea2_readonly'
+        AND v.table_type   = 'VIEW'
+        AND v.table_name   = c.table_name
+   )
    AND NOT (
      (c.table_name = 'users'            AND c.column_name = 'password_hash')
   OR (c.table_name = 'email_messages'   AND c.column_name = 'unsubscribe_token')
