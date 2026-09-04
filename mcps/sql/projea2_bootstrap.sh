@@ -79,6 +79,20 @@ FUITE_TBL=$(q "SELECT COUNT(*) FROM information_schema.tables
                WHERE table_schema='projea2_readonly' AND table_name IN
                  ('password_tokens','alembic_version','migration_id_map',
                   'migration_runs','migration_watermarks');")
+COL_MANQ=$(q "SELECT COUNT(*) FROM information_schema.columns c
+               WHERE c.table_schema='projea2'
+                 AND c.table_name IN ('users','email_messages','tracking_links',
+                     'export_approvals','tracking_hits')
+                 AND NOT (
+                   (c.table_name='users'            AND c.column_name='password_hash') OR
+                   (c.table_name='email_messages'   AND c.column_name='unsubscribe_token') OR
+                   (c.table_name='tracking_links'   AND c.column_name='token') OR
+                   (c.table_name='export_approvals' AND c.column_name='token') OR
+                   (c.table_name='tracking_hits'    AND c.column_name='ip'))
+                 AND NOT EXISTS (SELECT 1 FROM information_schema.columns v
+                     WHERE v.table_schema='projea2_readonly'
+                       AND v.table_name=c.table_name
+                       AND v.column_name=c.column_name);")
 SANS_VUE=$(q "SELECT COUNT(*) FROM information_schema.tables t
               WHERE t.table_schema='projea2' AND t.table_type='BASE TABLE'
                 AND t.table_name NOT IN ('password_tokens','alembic_version',
@@ -91,7 +105,7 @@ APP_OK=$(q "SELECT COUNT(*) FROM mysql.user WHERE User='projea2_readonly' AND Ho
 
 # Une requête de contrôle qui ne renvoie RIEN (erreur SQL, droits) ne doit pas
 # passer pour un « 0 » rassurant : on refuse de rendre un verdict à l'aveugle.
-for v in NB_VUES FUITE_COL FUITE_TBL SANS_VUE COLLISION APP_OK; do
+for v in NB_VUES FUITE_COL FUITE_TBL COL_MANQ SANS_VUE COLLISION APP_OK; do
   [ -n "${!v}" ] || ko "le contrôle $v n'a rien renvoyé — vérification impossible."
 done
 
@@ -103,6 +117,8 @@ printf '  %-46s %s\n' "colonnes secrètes exposées (attendu 0)"    "$FUITE_COL"
 [ "$FUITE_COL" = "0" ] || ERR=1
 printf '  %-46s %s\n' "tables exclues exposées (attendu 0)"       "$FUITE_TBL"
 [ "$FUITE_TBL" = "0" ] || ERR=1
+printf '  %-46s %s\n' "colonnes source hors vue §3a (attendu 0)"  "$COL_MANQ"
+[ "$COL_MANQ" = "0" ] || { echo "    ⚠️  vue projetée en retard sur sa table — compléter §3a du DDL"; ERR=1; }
 printf '  %-46s %s\n' "tables source sans vue (attendu 0)"        "$SANS_VUE"
 [ "$SANS_VUE" = "0" ] || echo "    ⚠️  table(s) nouvelle(s) : à exposer ou à exclure dans le DDL"
 printf '  %-46s %s\n' "collision projea2_readonly@% (attendu 0)"  "$COLLISION"

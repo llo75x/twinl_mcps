@@ -48,18 +48,21 @@ CREATE DATABASE IF NOT EXISTS projea2_readonly
 
 -- users : identité et état du compte, JAMAIS le hash de mot de passe.
 CREATE OR REPLACE VIEW projea2_readonly.users AS
-  SELECT id, email, display_name, is_active, password_changed_at,
-         phone, function_title, office_id, created_at, updated_at
+  SELECT id, email, display_name, first_name, last_name, is_active,
+         password_changed_at, phone, function_title, function_title_en,
+         office_id, created_at, updated_at
     FROM projea2.users;
 
 -- email_messages : `unsubscribe_token` retiré (jeton de capacité — il permet de
 -- désinscrire un destinataire). `message_uid` reste (corrélation des bounces).
 CREATE OR REPLACE VIEW projea2_readonly.email_messages AS
   SELECT id, event_id, company_contact_id, email_type_id, template_id,
-         from_email, to_email, subject, body_html, status, error_message,
-         sent_by_user_id, operation_id, message_uid,
+         campaign_id, language_id, notify_clicks_slack,
+         from_email, to_email, cc_emails, subject, body_html,
+         status, error_message, sent_by_user_id, operation_id, message_uid,
          opened_at, unsubscribed_at, bounced_at, bounce_kind, bounce_detail,
-         created_at, updated_at
+         read_receipt_at, read_receipt_disposition, body_modified,
+         operation_event_id, created_at, updated_at
     FROM projea2.email_messages;
 
 -- tracking_links : `token` retiré (jeton de capacité — il permet de simuler un
@@ -226,6 +229,33 @@ SELECT table_name, column_name AS fuite_colonne
   OR (table_name = 'tracking_links'   AND column_name = 'token')
   OR (table_name = 'export_approvals' AND column_name = 'token')
   OR (table_name = 'tracking_hits'    AND column_name = 'ip')
+   );
+
+-- Doit renvoyer 0 ligne : une colonne de la table source absente de sa vue
+-- PROJETÉE (§3a), alors qu'elle n'est pas dans la liste des secrets masqués.
+-- Les vues de §3a listent leurs colonnes à la main : un `ALTER TABLE ... ADD
+-- COLUMN` côté PROJEA2 ne les traverse donc PAS, et la colonne disparaît du
+-- miroir en silence. C'est arrivé : `email_messages` a perdu 8 colonnes sur les
+-- lots 1.4.0 et 1.5.0 — dont `campaign_id`, ce qui rendait le MCP aveugle sur
+-- « qui a reçu telle campagne ». Les vues de §3b (`SELECT *`) n'ont pas ce
+-- défaut ; ce contrôle ne vise donc que les 5 vues écrites à la main.
+SELECT c.table_name, c.column_name AS colonne_absente_de_la_vue
+  FROM information_schema.columns c
+ WHERE c.table_schema = 'projea2'
+   AND c.table_name IN ('users', 'email_messages', 'tracking_links',
+                        'export_approvals', 'tracking_hits')
+   AND NOT (
+     (c.table_name = 'users'            AND c.column_name = 'password_hash')
+  OR (c.table_name = 'email_messages'   AND c.column_name = 'unsubscribe_token')
+  OR (c.table_name = 'tracking_links'   AND c.column_name = 'token')
+  OR (c.table_name = 'export_approvals' AND c.column_name = 'token')
+  OR (c.table_name = 'tracking_hits'    AND c.column_name = 'ip')
+   )
+   AND NOT EXISTS (
+     SELECT 1 FROM information_schema.columns v
+      WHERE v.table_schema = 'projea2_readonly'
+        AND v.table_name   = c.table_name
+        AND v.column_name  = c.column_name
    );
 
 -- Doit renvoyer 0 ligne : aucune table de `projea2` ne doit être oubliée sans
