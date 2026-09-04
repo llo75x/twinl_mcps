@@ -170,6 +170,33 @@ ré-exécutions.
 | `tables exclues exposées` > 0 | 🛑 une table interdite a une vue | idem |
 | `colonnes source hors vue` > 0 | une vue est en retard sur sa table (un `ADD COLUMN` ne traverse ni §3a, écrite à la main, ni §3b, dont le `SELECT *` est figé au `CREATE VIEW`) | compléter la vue en §3a du DDL puis `CREATE OR REPLACE VIEW` — pas besoin de rejouer tout le bootstrap |
 
+#### 1.3bis Valeurs partagées entre MCP — `common.env`
+
+`projea2_bootstrap.sh` réécrit `projea2.env` à chaque exécution : les valeurs qui
+ne lui sont pas propres doivent donc venir d'ailleurs. Elles vivent dans
+**`/opt/twinl_mcps/mcps/common.env`** (chmod 600, `ethan`), que le bootstrap lit
+sans jamais le réécrire :
+
+```ini
+AUTHKIT_DOMAIN=…            # même domaine AuthKit pour tous les MCP
+SLACK_WEBHOOK_URL=…         # même canal
+SLACK_SIGNING_SECRET=…      # même app Slack, donc même secret
+SLACK_NOTIFY_THRESHOLD=…
+SLACK_BYTES_THRESHOLD=…
+SLACK_APPROVAL_TIMEOUT_S=…
+```
+
+Une valeur **vide est acceptée** (c'est le cas prévu quand on coupe Slack) ; c'est
+la **ligne** qui doit exister — le bootstrap échoue en nommant la clé manquante.
+
+> **Pourquoi ce fichier existe.** Ces 6 valeurs étaient lues dans `projea.env`, le
+> `.env` du MCP **legacy** `mcp-projea`, déconnecté le 2026-08-01 et dont le
+> décommissionnement est prescrit plus bas. Le bootstrap du MCP vivant dépendait
+> donc d'un fichier qu'on demandait par ailleurs de supprimer. Découplé le
+> 2026-09-04 : la bascule est automatique — si `common.env` manque et que
+> `projea.env` est encore là, le bootstrap l'amorce une fois, puis ne le relit
+> plus jamais.
+
 #### Vérifier la dérive de colonnes ENTRE deux bootstraps
 
 Le verdict ci-dessus s'exécute juste après la création des vues : il ne peut donc
@@ -462,7 +489,8 @@ migration reste **rejouable** (`deploy/deploy.sh --reset-migration`).
 | Objet | Sort |
 |---|---|
 | Connecteur `mcp-projea` dans claude.ai | **supprimer** |
-| Conteneur `mcp-projea` + `projea.env` | **arrêter / retirer** |
+| Conteneur `mcp-projea` | **arrêter / retirer** |
+| `projea.env` | **retirer — mais APRÈS avoir vérifié que `common.env` existe** (voir §1.3bis). Il portait `AUTHKIT_DOMAIN` et les 5 `SLACK_*` dont `projea2_bootstrap.sh` héritait : le supprimer avant la bascule bloquait le bootstrap du MCP **vivant**. Découplé le 2026-09-04, `common.env` créé — la suppression est désormais sans effet de bord. |
 | Vhost `mcp-projea.twinl.fr` + cert + DNS | **retirer** (ou laisser, inoffensif) |
 | Resource indicator WorkOS `mcp-projea.twinl.fr/mcp` | **retirer** |
 | User MariaDB `projea_readonly` | ⛔ **GARDER** — migration PROJEA2 |

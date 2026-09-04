@@ -10,7 +10,15 @@
 #   3. exécute le DDL en root MariaDB (user + DB miroir + 45 vues) ;
 #   4. VÉRIFIE le résultat et rend un verdict lisible (pas du SQL brut à décoder) ;
 #   5. écrit /opt/twinl_mcps/mcps/projea2.env (600, ethan), en héritant
-#      AUTHKIT_DOMAIN et les réglages Slack de projea.env.
+#      AUTHKIT_DOMAIN et les réglages Slack de common.env.
+#
+# common.env porte les valeurs COMMUNES aux MCP (domaine AuthKit, app Slack :
+# même app => même signing secret et même webhook). Elles vivaient dans
+# projea.env, le .env du MCP **legacy** `mcp-projea` — déconnecté le 2026-08-01,
+# Projea1 n'étant plus utilisé. Ce script en dépendait donc pour démarrer : le
+# RUNBOOK demandait par ailleurs de retirer projea.env au décommissionnement,
+# ce qui aurait cassé le bootstrap du MCP encore vivant. Découplé le 2026-09-04.
+# La bascule est automatique (§0.bis) ; une fois faite, projea.env est supprimable.
 #
 # IDEMPOTENT : rejouable. Attention, chaque exécution RÉINITIALISE le mot de
 # passe de `projea2_mcp` et réécrit projea2.env — les deux restent donc
@@ -28,16 +36,45 @@ SRC=/opt/twinl_mcps/mcps/sql/projea2_setup.sql
 LOCAL=/root/projea2_setup.local.sql
 ENVDIR=/opt/twinl_mcps/mcps
 ENVFILE="$ENVDIR/projea2.env"
+COMMON="$ENVDIR/common.env"          # valeurs partagées entre MCP
+LEGACY="$ENVDIR/projea.env"          # .env du MCP legacy — n'existe plus après décommissionnement
+
+# Les clés héritées. Une seule liste : elle sert à amorcer common.env ET à
+# vérifier, en fin de course, qu'aucune n'est tombée en route.
+SHARED_KEYS='AUTHKIT_DOMAIN SLACK_WEBHOOK_URL SLACK_SIGNING_SECRET
+SLACK_NOTIFY_THRESHOLD SLACK_BYTES_THRESHOLD SLACK_APPROVAL_TIMEOUT_S'
 
 ko() { echo; echo "❌ ÉCHEC : $*"; echo "   Rien n'est à moitié fait : le script est rejouable tel quel."; exit 1; }
 
 echo "=== 0. Contrôles préalables ==================================="
 [ "$(id -u)" -eq 0 ]        || ko "à lancer en root (sudo)."
 [ -r "$SRC" ]               || ko "DDL introuvable : $SRC — faire un 'git pull' dans /opt/twinl_mcps."
-[ -r "$ENVDIR/projea.env" ] || ko "projea.env introuvable : impossible d'hériter AUTHKIT_DOMAIN et Slack."
 command -v mysql >/dev/null || ko "client mysql absent."
 mysql -e "SELECT 1" >/dev/null 2>&1 || ko "pas d'accès root à MariaDB (socket)."
 echo "OK — root, DDL présent, MariaDB joignable."
+
+echo
+echo "=== 0.bis. Valeurs partagées (common.env) ====================="
+# Bascule unique depuis le .env du MCP legacy, pour les installations qui n'ont
+# pas encore common.env. Écrit par grep : les valeurs ne transitent NI par
+# l'affichage NI par une variable du script.
+if [ ! -r "$COMMON" ] && [ -r "$LEGACY" ]; then
+  : > "$COMMON" || ko "création de $COMMON."
+  chmod 600 "$COMMON"
+  for k in $SHARED_KEYS; do grep -E "^$k=" "$LEGACY" >> "$COMMON" || true; done
+  chown ethan:ethan "$COMMON"
+  echo "→ $COMMON amorcé depuis $LEGACY (bascule unique)."
+  echo "  $LEGACY n'est plus utilisé par ce script : il est désormais supprimable."
+fi
+
+[ -r "$COMMON" ] || ko "$COMMON introuvable : impossible d'hériter AUTHKIT_DOMAIN et Slack.
+   Le créer (chmod 600, ethan) avec les lignes : $(echo $SHARED_KEYS | tr ' ' ',').
+   Valeurs : mêmes domaine AuthKit et même app Slack que les autres MCP."
+
+for k in $SHARED_KEYS; do
+  grep -qE "^$k=" "$COMMON" || ko "clé $k absente de $COMMON (une ligne '$k=' est attendue, valeur éventuellement vide)."
+done
+echo "OK — $(echo $SHARED_KEYS | wc -w) clés partagées présentes dans $COMMON."
 
 echo
 echo "=== 1. Génération du mot de passe (sur ce serveur) ============"
@@ -131,7 +168,7 @@ echo "OK — aucun secret exposé, compte applicatif intact."
 
 echo
 echo "=== 5. Écriture de projea2.env ================================"
-inherit() { grep -E "^$1=" "$ENVDIR/projea.env" || true; }   # AUTHKIT + Slack : mêmes valeurs
+inherit() { grep -E "^$1=" "$COMMON" || true; }   # AUTHKIT + Slack : mêmes valeurs
 {
   echo "MCP_SERVER_NAME=mcp-projea2-readonly"
   echo "MCP_PORT=8080"
@@ -156,7 +193,10 @@ inherit() { grep -E "^$1=" "$ENVDIR/projea.env" || true; }   # AUTHKIT + Slack :
 chmod 600 "$ENVFILE"
 chown ethan:ethan "$ENVFILE"
 
-grep -q '^AUTHKIT_DOMAIN=https' "$ENVFILE" || ko "AUTHKIT_DOMAIN non hérité — projea.env a changé de forme."
+grep -q '^AUTHKIT_DOMAIN=https' "$ENVFILE" || ko "AUTHKIT_DOMAIN non hérité — $COMMON a changé de forme."
+for k in $SHARED_KEYS; do
+  grep -qE "^$k=" "$ENVFILE" || ko "clé partagée $k absente de $ENVFILE — l'héritage depuis $COMMON a échoué."
+done
 echo "OK — $ENVFILE (chmod 600, ethan) :"
 sed -E 's/=.*/=<valeur>/' "$ENVFILE" | sed 's/^/    /'
 
