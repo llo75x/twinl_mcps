@@ -138,6 +138,7 @@ Sortie attendue, en fin de course :
   vues créées (attendu 45)                       45
   colonnes secrètes exposées (attendu 0)         0
   tables exclues exposées (attendu 0)            0
+  colonnes source hors vue §3a (attendu 0)       0
   tables source sans vue (attendu 0)             0
   collision projea2_readonly@% (attendu 0)       0
   compte applicatif intact (attendu 1)           1
@@ -167,6 +168,7 @@ ré-exécutions.
 | `vues créées` ≠ 45 | le schéma de `projea2` a bougé | regarder `tables source sans vue` : une table neuve doit être **exposée ou exclue** dans le DDL, puis relancer |
 | `colonnes secrètes exposées` > 0 | 🛑 une vue laisse fuiter un secret | **ne pas continuer** — le DDL a été modifié à tort |
 | `tables exclues exposées` > 0 | 🛑 une table interdite a une vue | idem |
+| `colonnes source hors vue §3a` > 0 | une des 5 vues à colonnes écrites à la main est en retard sur sa table (un `ADD COLUMN` ne les traverse pas) | compléter la vue en §3a du DDL, puis `CREATE OR REPLACE VIEW` — pas besoin de rejouer tout le bootstrap |
 | `collision projea2_readonly@%` > 0 | un compte homonyme du MCP existe | voir §1.5 — arbitrer avant d'aller plus loin |
 | `compte applicatif intact` = 0 | le compte des listes Expert/IA a disparu | rien à voir avec le MCP, mais à traiter côté PROJEA2 |
 
