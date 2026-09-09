@@ -197,7 +197,7 @@ la **ligne** qui doit exister — le bootstrap échoue en nommant la clé manqua
 > `projea.env` est encore là, le bootstrap l'amorce une fois, puis ne le relit
 > plus jamais.
 
-#### Vérifier la dérive de colonnes ENTRE deux bootstraps
+#### Vérifier la dérive ENTRE deux bootstraps — colonnes ET tables
 
 Le verdict ci-dessus s'exécute juste après la création des vues : il ne peut donc
 pas voir une vue §3b (`SELECT *`) en retard, puisqu'elle vient d'être refaite. Or
@@ -227,8 +227,52 @@ SELECT c.table_name, c.column_name AS colonne_absente_de_la_vue
                       AND v.table_name=c.table_name AND v.column_name=c.column_name);"'
 ```
 
-0 ligne = miroir à jour. Sinon, pour une vue §3b il suffit de la refaire :
+0 ligne = miroir à jour **sur les colonnes**. Sinon, pour une vue §3b il suffit
+de la refaire :
 `CREATE OR REPLACE VIEW projea2_readonly.<table> AS SELECT * FROM projea2.<table>;`
+
+##### Et la table ENTIÈRE qui n'a pas de vue
+
+La requête ci-dessus ne voit que les tables **déjà** exposées : elle compare les
+colonnes des vues existantes. Une table NOUVELLE n'a pas de vue du tout, donc pas
+de ligne à comparer — elle est invisible au MCP **et** invisible au contrôle. Le
+script `projea2_setup.sql` porte bien ce garde-fou (§7, `table_source_sans_vue`),
+mais il ne s'exécute qu'au bootstrap, et seul le bootstrap crée les vues
+manquantes : entre deux, une table neuve reste hors du miroir indéfiniment, sans
+que rien ne le dise.
+
+Ce n'est pas théorique. Le 2026-09-09, **14 tables** étaient dans ce cas —
+`it_deals` (née en 1.1.0, soit huit mois plus tôt), `bodacc_statuses`,
+`bodacc_website_probes`, `bodacc_review_decisions`, `email_finder_domain_cache`,
+`email_finder_runs`, `gender_review_marks`, `operation_reports`,
+`operation_report_sends`, `pappers_lookups`, `recent_views`,
+`scheduler_daily_runs`, `search_exclusions`, `yousign_webhook_events`. Le MCP
+était donc aveugle sur tout le classement des deals, tout le BODACC, tous les
+rapports d'opération et toutes les fiches consultées, en silence.
+
+À rejouer avec la précédente, au même moment :
+
+```bash
+ssh vps 'sudo mysql --table -e "
+SELECT t.table_name AS table_source_sans_vue
+  FROM information_schema.tables t
+ WHERE t.table_schema=\"projea2\" AND t.table_type=\"BASE TABLE\"
+   AND t.table_name NOT IN (\"password_tokens\", \"alembic_version\",
+                            \"migration_id_map\", \"migration_runs\",
+                            \"migration_watermarks\")
+   AND NOT EXISTS (SELECT 1 FROM information_schema.tables v
+                    WHERE v.table_schema=\"projea2_readonly\"
+                      AND v.table_type=\"VIEW\" AND v.table_name=t.table_name);"'
+```
+
+0 ligne = aucune table oubliée. Sinon, pour chacune, **décider** avant de créer :
+une table qui porte un secret ou une capacité (jeton, hash, clé) va dans la liste
+d'exclusion (b) du §3b de `projea2_setup.sql` — sinon elle s'expose comme les
+autres, la politique du miroir étant « tout est exposé sauf exclusions » :
+`CREATE OR REPLACE VIEW projea2_readonly.<table> AS SELECT * FROM projea2.<table>;`
+
+Le contrôle des colonnes ne dispense donc pas de celui-ci : ils attrapent deux
+défauts différents, et c'est le second qui passe le plus longtemps inaperçu.
 | `collision projea2_readonly@%` > 0 | un compte homonyme du MCP existe | voir §1.5 — arbitrer avant d'aller plus loin |
 | `compte applicatif intact` = 0 | le compte des listes Expert/IA a disparu | rien à voir avec le MCP, mais à traiter côté PROJEA2 |
 
